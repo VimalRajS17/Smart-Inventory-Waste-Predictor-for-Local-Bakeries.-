@@ -1,0 +1,1 @@
+# Smart-Inventory-Waste-Predictor-for-Local-Bakeries.-

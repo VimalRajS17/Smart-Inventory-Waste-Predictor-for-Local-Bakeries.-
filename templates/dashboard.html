@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bakery Inventory & Waste Predictor</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Loaf Ledger</h1>
+  <p class="tagline">Tomorrow's bake plan, based on {{ target_date }}</p>
+</header>
+
+<main>
+  <section class="predictions">
+    <h2>Predicted demand for {{ target_date }}</h2>
+    <table id="predictions-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>In stock now</th>
+          <th>Predicted demand</th>
+          <th>Suggested order</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in predictions %}
+        <tr class="{{ 'row-alert' if p.suggested_order and p.suggested_order > 0 else '' }}">
+          <td class="item-name">{{ p.name }}</td>
+          <td>{{ p.current_stock }}</td>
+          <td>{{ p.predicted_demand if p.predicted_demand is not none else '—' }}</td>
+          <td>
+            {% if p.suggested_order is not none %}
+              {% if p.suggested_order > 0 %}
+                <span class="order-badge">bake {{ p.suggested_order }} more</span>
+              {% else %}
+                <span class="ok-badge">stock is enough</span>
+              {% endif %}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="live-predict">
+    <h2>Try a live prediction</h2>
+    <p class="section-note">Change the item, date, or weather and see the model respond instantly — this calls the trained model directly, nothing here is pre-computed.</p>
+
+    <div class="predict-form">
+      <label>
+        Item
+        <select id="predict-item">
+          {% for name in item_names %}
+          <option value="{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        Date
+        <input type="date" id="predict-date" value="{{ target_date }}">
+      </label>
+
+      <label>
+        Temperature (°C)
+        <input type="number" id="predict-temp" value="25">
+      </label>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="predict-rainy">
+        Rainy
+      </label>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="predict-holiday">
+        Holiday
+      </label>
+
+      <button id="predict-btn" type="button">Predict</button>
+    </div>
+
+    <div id="predict-result" class="predict-result"></div>
+  </section>
+
+  <section class="waste">
+    <h2>Waste logged so far</h2>
+    <div id="waste-summary">
+      {% include "_waste_summary.html" %}
+    </div>
+  </section>
+
+  <section class="log-forms">
+    <form id="sale-form" class="log-form">
+      <h3>Log a sale</h3>
+      <input type="text" name="item_name" placeholder="Item name" required>
+      <input type="number" name="quantity" placeholder="Quantity sold" required min="0">
+      <button type="submit">Log sale</button>
+      <p class="form-feedback" data-feedback-for="sale-form"></p>
+    </form>
+
+    <form id="waste-form" class="log-form">
+      <h3>Log waste</h3>
+      <input type="text" name="item_name" placeholder="Item name" required>
+      <input type="number" name="quantity" placeholder="Quantity wasted" required min="0">
+      <input type="text" name="reason" placeholder="Reason (optional)">
+      <button type="submit">Log waste</button>
+      <p class="form-feedback" data-feedback-for="waste-form"></p>
+    </form>
+  </section>
+</main>
+
+<script>
+document.getElementById("predict-btn").addEventListener("click", async () => {
+  const item = document.getElementById("predict-item").value;
+  const dateVal = document.getElementById("predict-date").value;
+  const temp = document.getElementById("predict-temp").value;
+  const rainy = document.getElementById("predict-rainy").checked ? 1 : 0;
+  const holiday = document.getElementById("predict-holiday").checked ? 1 : 0;
+
+  const resultBox = document.getElementById("predict-result");
+  resultBox.textContent = "Predicting…";
+
+  const params = new URLSearchParams({
+    item: item, date: dateVal, temperature_c: temp,
+    is_rainy: rainy, is_holiday: holiday
+  });
+
+  try {
+    const res = await fetch(`/api/predict?${params.toString()}`);
+    const data = await res.json();
+    if (data.error) {
+      resultBox.textContent = `Error: ${data.error}`;
+    } else {
+      resultBox.innerHTML = `Predicted demand for <strong>${data.item}</strong> on ${data.date}: <strong>${data.predicted_quantity}</strong> units`;
+    }
+  } catch (err) {
+    resultBox.textContent = "Something went wrong reaching the server.";
+  }
+});
+
+function wireForm(formId, url) {
+  const form = document.getElementById(formId);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const feedback = form.querySelector(".form-feedback");
+    const formData = new FormData(form);
+
+    try {
+      const res = await fetch(url, { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.status === "ok") {
+        feedback.textContent = "Logged successfully.";
+        feedback.classList.add("success");
+        form.reset();
+        refreshWasteSummary();
+      } else {
+        feedback.textContent = "Something went wrong.";
+      }
+    } catch (err) {
+      feedback.textContent = "Could not reach the server.";
+    }
+  });
+}
+
+async function refreshWasteSummary() {
+  const res = await fetch("/waste-summary-partial");
+  const html = await res.text();
+  document.getElementById("waste-summary").innerHTML = html;
+}
+
+wireForm("sale-form", "/log-sale");
+wireForm("waste-form", "/log-waste");
+</script>
+
+</body>
+</html>

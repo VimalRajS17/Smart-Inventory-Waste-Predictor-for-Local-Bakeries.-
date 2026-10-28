@@ -1,0 +1,9 @@
+{% if waste_summary %}
+<ul class="waste-list">
+  {% for w in waste_summary %}
+  <li><span>{{ w.item_name }}</span><span>{{ w.total_wasted }} units</span></li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty-state">No waste logged yet — record it below as it happens, so predictions keep improving.</p>
+{% endif %}

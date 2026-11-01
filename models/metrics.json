@@ -2,21 +2,21 @@
   "results": [
     {
       "model": "Moving Average",
-      "mae": 7.26,
-      "rmse": 9.32,
-      "mape": 17.74
+      "mae": 7.36,
+      "rmse": 10.06,
+      "mape": 18.15
     },
     {
       "model": "Linear Regression",
-      "mae": 4.18,
-      "rmse": 5.45,
-      "mape": 10.09
+      "mae": 4.45,
+      "rmse": 6.02,
+      "mape": 10.77
     },
     {
       "model": "Random Forest",
-      "mae": 4.14,
-      "rmse": 5.32,
-      "mape": 9.82
+      "mae": 4.37,
+      "rmse": 6.28,
+      "mape": 10.28
     }
   ],
   "best_model": "Random Forest"

@@ -1,0 +1,697 @@
+{% extends "base.html" %}
+
+{% block title %}Reports & Forecast Accuracy — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="screen-header">
+  <div>
+    <h2 class="screen-title">Reports & Forecast Accuracy</h2>
+    <p class="screen-subtitle">Track historical forecast accuracy, waste metrics, and economic simulation on past data.</p>
+  </div>
+  <div class="screen-actions" style="flex-wrap: wrap; gap: 0.5rem;">
+    <div style="display:flex; align-items:center; gap:0.4rem;">
+      <label for="report-end-date" style="font-size:0.85rem; color:var(--text-secondary); font-weight:600;">
+        End Date:
+      </label>
+      <input type="date" id="report-end-date" class="input-field" style="padding:0.4rem 0.6rem; min-height:44px; width:auto;" aria-label="Report end date">
+    </div>
+
+    <div style="display:flex; align-items:center; gap:0.4rem;">
+      <label for="report-item-select" style="font-size:0.85rem; color:var(--text-secondary); font-weight:600;">
+        Item:
+      </label>
+      <select id="report-item-select" class="select-field" style="padding:0.4rem 0.6rem; min-height:44px;">
+        <option value="">All Bakery Items</option>
+      </select>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:0.4rem;">
+      <label for="report-period-select" style="font-size:0.85rem; color:var(--text-secondary); font-weight:600;">
+        Period:
+      </label>
+      <select id="report-period-select" class="select-field" style="padding:0.4rem 0.6rem; min-height:44px;">
+        <option value="7" selected>Last 7 Days</option>
+        <option value="14">Last 14 Days</option>
+        <option value="28">Last 28 Days (4 Weeks)</option>
+        <option value="60">Last 60 Days</option>
+      </select>
+    </div>
+
+    <button id="reports-refresh-btn" class="btn btn-secondary" style="min-height:44px;" type="button" aria-label="Refresh report metrics">
+      ↻ Refresh
+    </button>
+
+    <a href="/api/export/daily-log" class="btn btn-secondary" style="min-height:44px; text-decoration:none; display:inline-flex; align-items:center;" download id="btn-export-daily">
+      📥 Export Daily Log (CSV)
+    </a>
+
+    <a href="/api/export/forecasts" class="btn btn-secondary" style="min-height:44px; text-decoration:none; display:inline-flex; align-items:center;" download id="btn-export-forecasts">
+      📥 Export Forecasts (CSV)
+    </a>
+  </div>
+</div>
+
+<!-- Model Telemetry Banner -->
+<div id="reports-model-telemetry" class="info-banner" style="margin-bottom:1.25rem; display:none;"></div>
+
+<!-- 1. Accuracy Report Section (Last 28 Days) -->
+<div id="reports-accuracy-container" style="margin-bottom:2rem;"></div>
+
+<!-- Summary KPI Metric Cards -->
+<div id="reports-kpis-container" class="kpi-grid"></div>
+
+<!-- Visual Inline SVG Chart Container -->
+<div class="chart-container" style="margin-bottom:2rem;">
+  <div class="chart-header">
+    <div id="chart-title-text" class="chart-title">Forecast vs actual, last 7 days</div>
+    <div class="chart-legend">
+      <div class="legend-item">
+        <span class="legend-swatch" style="background-color:var(--chart-forecast);"></span>
+        <span>Forecast</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-swatch" style="background-color:var(--chart-actual);"></span>
+        <span>Actual Sold</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="reports-chart-wrapper"></div>
+</div>
+
+<!-- 2. What the App Would Have Saved (Simulation on past data) -->
+<div id="reports-simulation-container" style="margin-bottom:2rem;"></div>
+
+<!-- 3. Waste Report Section (Logged Wasted + Leftover, Last 4 Weeks) -->
+<div id="reports-waste-container" style="margin-bottom:2rem;"></div>
+
+<!-- 4. Detailed Daily Breakdown Table -->
+<div id="reports-table-container"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const itemSelect = document.getElementById("report-item-select");
+  const periodSelect = document.getElementById("report-period-select");
+  const endDateInput = document.getElementById("report-end-date");
+  const refreshBtn = document.getElementById("reports-refresh-btn");
+  const chartTitleText = document.getElementById("chart-title-text");
+  const kpisContainer = document.getElementById("reports-kpis-container");
+  const chartWrapper = document.getElementById("reports-chart-wrapper");
+  const tableContainer = document.getElementById("reports-table-container");
+  const accuracyContainer = document.getElementById("reports-accuracy-container");
+  const simulationContainer = document.getElementById("reports-simulation-container");
+  const wasteContainer = document.getElementById("reports-waste-container");
+
+  // Read URL query parameters
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramTo = urlParams.get("to");
+  const paramDays = urlParams.get("days");
+  const paramItem = urlParams.get("item_id");
+
+  let days = 7;
+  let selectedItemId = paramItem || "";
+  let itemsCache = [];
+
+  if (paramTo && endDateInput) {
+    endDateInput.value = paramTo;
+  }
+  if (paramDays && periodSelect) {
+    periodSelect.value = paramDays;
+    days = parseInt(paramDays, 10) || 7;
+  }
+
+  if (itemSelect) {
+    itemSelect.addEventListener("change", (e) => {
+      selectedItemId = e.target.value;
+      loadReports();
+    });
+  }
+
+  if (periodSelect) {
+    periodSelect.addEventListener("change", (e) => {
+      days = parseInt(e.target.value, 10) || 7;
+      loadReports();
+    });
+  }
+
+  if (endDateInput) {
+    endDateInput.addEventListener("change", loadReports);
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", loadReports);
+  }
+
+  async function populateItems() {
+    try {
+      const items = await window.LoafAPI.fetch("/api/items");
+      itemsCache = items || [];
+      if (itemSelect) {
+        itemSelect.innerHTML = '<option value="">All Bakery Items</option>';
+        for (const it of itemsCache) {
+          const opt = document.createElement("option");
+          opt.value = it.id;
+          opt.textContent = it.name;
+          itemSelect.appendChild(opt);
+        }
+        if (selectedItemId) {
+          itemSelect.value = selectedItemId;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not populate items in reports select:", err);
+    }
+  }
+
+  async function loadReports() {
+    window.LoafAPI.showLoading(chartWrapper, "Calculating forecast accuracy and sales records...");
+    kpisContainer.innerHTML = "";
+    tableContainer.innerHTML = "";
+
+    // Load in parallel
+    await Promise.allSettled([
+      loadForecastVsActual(),
+      loadAccuracyReport(),
+      loadSimulationReport(),
+      loadWasteReport()
+    ]);
+  }
+
+  async function loadForecastVsActual() {
+    try {
+      let url = `/api/reports/forecast-vs-actual?days=${days}`;
+      if (endDateInput && endDateInput.value) {
+        url += `&to=${encodeURIComponent(endDateInput.value)}`;
+      }
+      if (selectedItemId) {
+        url += `&item_id=${encodeURIComponent(selectedItemId)}`;
+      }
+      const data = await window.LoafAPI.fetch(url);
+      renderForecastVsActual(data);
+    } catch (err) {
+      window.LoafAPI.showError(chartWrapper, err.message || "Could not retrieve report data.", loadForecastVsActual);
+    }
+  }
+
+  async function loadAccuracyReport() {
+    if (!accuracyContainer) return;
+    try {
+      let url = `/api/reports/accuracy?days=28`;
+      if (endDateInput && endDateInput.value) {
+        url += `&to=${encodeURIComponent(endDateInput.value)}`;
+      }
+      const data = await window.LoafAPI.fetch(url);
+      renderAccuracyTable(data);
+    } catch (err) {
+      accuracyContainer.innerHTML = `<p style="color:var(--alert); font-size:0.88rem;">Error loading accuracy report: ${window.LoafAPI.escape(err.message)}</p>`;
+    }
+  }
+
+  async function loadSimulationReport() {
+    if (!simulationContainer) return;
+    try {
+      const data = await window.LoafAPI.fetch("/api/reports/simulation?days=60");
+      renderSimulationTable(data);
+    } catch (err) {
+      simulationContainer.innerHTML = `<p style="color:var(--alert); font-size:0.88rem;">Error loading simulation: ${window.LoafAPI.escape(err.message)}</p>`;
+    }
+  }
+
+  async function loadWasteReport() {
+    if (!wasteContainer) return;
+    try {
+      let url = `/api/reports/waste?days=28`;
+      if (endDateInput && endDateInput.value) {
+        url += `&to=${encodeURIComponent(endDateInput.value)}`;
+      }
+      const data = await window.LoafAPI.fetch(url);
+      renderWasteTable(data);
+    } catch (err) {
+      wasteContainer.innerHTML = `<p style="color:var(--alert); font-size:0.88rem;">Error loading waste report: ${window.LoafAPI.escape(err.message)}</p>`;
+    }
+  }
+
+  function renderForecastVsActual(data) {
+    const summary = data.summary || {};
+    const daily = data.daily || [];
+    const records = data.records || [];
+    const item = data.item;
+
+    if (endDateInput && !endDateInput.value && data.period && data.period.end_date) {
+      endDateInput.value = data.period.end_date;
+    }
+
+    const periodLabel = `last ${data.period?.days ?? days} days`;
+    if (item && item.name) {
+      chartTitleText.textContent = `Forecast vs actual, ${periodLabel} — ${item.name}`;
+    } else {
+      chartTitleText.textContent = `Forecast vs actual, ${periodLabel} — All Bakery Items`;
+    }
+
+    // Telemetry Banner
+    const telemetryBanner = document.getElementById("reports-model-telemetry");
+    if (telemetryBanner) {
+      if (data.active_model) {
+        const m = data.active_model;
+        const trainedDate = m.trained_at ? m.trained_at.replace("T", " ").substring(0, 19) + " UTC" : "Recently";
+        const maeText = m.mae !== null ? ` · Evaluation MAE: ${m.mae}` : "";
+        telemetryBanner.style.display = "flex";
+        telemetryBanner.innerHTML = `
+          <div class="info-banner-icon">🤖</div>
+          <div style="flex:1;">
+            <strong>Active Demand Model:</strong> ${window.LoafAPI.escape(m.model_type)} (v${m.version})${maeText}
+            <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:2px;">
+              Last trained: <strong>${window.LoafAPI.escape(trainedDate)}</strong>
+            </div>
+          </div>
+        `;
+      } else {
+        telemetryBanner.style.display = "none";
+      }
+    }
+
+    // KPI Cards
+    const maeText = summary.mae !== null ? `${summary.mae} <span style="font-size:0.85rem; font-weight:normal;">units</span>` : "—";
+    const scopeLabel = item ? `For ${window.LoafAPI.escape(item.name)}` : `Across all bakery items`;
+
+    let latestBannerHtml = "";
+    if (summary.records_count === 0 && data.latest_available_date && data.latest_available_date !== endDateInput.value) {
+      latestBannerHtml = `
+        <div style="grid-column: 1 / -1; padding: 0.75rem 1rem; background: var(--bg-surface-alt); border: 1px solid var(--border-color); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+          <span style="font-size:0.88rem; color:var(--text-secondary);">
+            📅 No sales records in the selected window. Historical data exists up to <strong>${data.latest_available_date}</strong>.
+          </span>
+          <button type="button" class="btn btn-secondary btn-sm" id="jump-latest-btn" style="min-height:32px;">
+            Jump to ${data.latest_available_date} ➔
+          </button>
+        </div>
+      `;
+    }
+
+    kpisContainer.innerHTML = `
+      ${latestBannerHtml}
+      <div class="kpi-card">
+        <div class="kpi-title">Actual Sold</div>
+        <div class="kpi-value">${summary.total_sold ?? 0}</div>
+        <div class="kpi-sub">${scopeLabel}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Forecasted Demand</div>
+        <div class="kpi-value">${summary.total_forecast ?? 0}</div>
+        <div class="kpi-sub">Predicted over ${data.period?.days ?? days} days</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Total Wasted</div>
+        <div class="kpi-value" style="color:var(--alert);">${summary.total_wasted ?? 0}</div>
+        <div class="kpi-sub">Spoiled or discarded units</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Forecast Error (MAE)</div>
+        <div class="kpi-value" style="color:var(--accent);">${maeText}</div>
+        <div class="kpi-sub">Mean absolute variance</div>
+      </div>
+    `;
+
+    const jumpBtn = document.getElementById("jump-latest-btn");
+    if (jumpBtn) {
+      jumpBtn.addEventListener("click", () => {
+        endDateInput.value = data.latest_available_date;
+        loadReports();
+      });
+    }
+
+    renderSvgChart(daily, item);
+    renderTable(records);
+  }
+
+  function renderAccuracyTable(data) {
+    if (!accuracyContainer) return;
+    const items = data.items || [];
+    const overall = data.overall || {};
+
+    let rowsHtml = "";
+    if (items.length === 0) {
+      rowsHtml = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1rem;">No forecasts with logged actuals found in the last 28 days.</td></tr>`;
+    } else {
+      for (const it of items) {
+        const beatBadge = it.beats_baseline
+          ? `<span class="badge badge-ok">✓ Beats Baseline</span>`
+          : `<span class="badge badge-neutral">Baseline Ahead</span>`;
+        rowsHtml += `
+          <tr>
+            <td><strong>${window.LoafAPI.escape(it.item_name)}</strong></td>
+            <td>${it.records_count}</td>
+            <td><strong>${it.mae}</strong></td>
+            <td><strong>${it.wape_pct}%</strong> (${it.wape})</td>
+            <td>${it.baseline_wape_pct}% (${it.baseline_wape})</td>
+            <td>${beatBadge}</td>
+          </tr>
+        `;
+      }
+      // Add shop overall summary row
+      if (overall.records_count > 0) {
+        const overallBeat = overall.beats_baseline
+          ? `<span class="badge badge-ok">✓ Beats Baseline</span>`
+          : `<span class="badge badge-neutral">Baseline Ahead</span>`;
+        rowsHtml += `
+          <tr style="background:var(--bg-surface-alt); font-weight:600; border-top:2px solid var(--border-color);">
+            <td>Overall Shop Average</td>
+            <td>${overall.records_count}</td>
+            <td>${overall.mae}</td>
+            <td>${overall.wape_pct}%</td>
+            <td>${overall.baseline_wape_pct}%</td>
+            <td>${overallBeat}</td>
+          </tr>
+        `;
+      }
+    }
+
+    accuracyContainer.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+        <div>
+          <h3 style="margin:0; font-family:var(--font-serif); font-size:1.25rem;">28-Day Forecast Accuracy by Item</h3>
+          <p style="margin:2px 0 0; font-size:0.85rem; color:var(--text-secondary);">
+            Computed from recorded forecasts and verified actual sales over the last 28 days.
+          </p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Observations</th>
+              <th>MAE (Units)</th>
+              <th>Model WAPE</th>
+              <th>Baseline WAPE (Lag-7)</th>
+              <th>Accuracy Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderSimulationTable(data) {
+    if (!simulationContainer) return;
+    const policies = data.policies || [];
+    const simLabel = data.simulation_label || "Simulation on past data";
+
+    let rowsHtml = "";
+    if (policies.length === 0) {
+      rowsHtml = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:1rem;">Simulation results pending or no historical logs available.</td></tr>`;
+    } else {
+      for (const p of policies) {
+        let savBadge = `<span style="color:var(--text-muted)">—</span>`;
+        if (p.savings_vs_baseline > 0) {
+          savBadge = `<strong style="color:var(--ok);">+£${p.savings_vs_baseline.toFixed(2)}</strong>`;
+        } else if (p.savings_vs_baseline < 0) {
+          savBadge = `<span style="color:var(--alert);">-£${Math.abs(p.savings_vs_baseline).toFixed(2)}</span>`;
+        } else {
+          savBadge = `<span style="color:var(--text-secondary);">£0.00 (Base)</span>`;
+        }
+
+        const isWinner = p.savings_vs_baseline === Math.max(...policies.map(x => x.savings_vs_baseline)) && p.savings_vs_baseline > 0;
+        const winnerBadge = isWinner ? ` <span class="badge badge-accent">Best Policy</span>` : "";
+
+        rowsHtml += `
+          <tr>
+            <td><strong>${window.LoafAPI.escape(p.display_name)}</strong>${winnerBadge}</td>
+            <td>${p.total_baked}</td>
+            <td>${p.waste_units} units <span style="font-size:0.82rem; color:var(--text-secondary);">(£${p.waste_cost.toFixed(2)})</span></td>
+            <td>${p.lost_sales_units} units <span style="font-size:0.82rem; color:var(--text-secondary);">(£${p.lost_sales_cost.toFixed(2)})</span></td>
+            <td><strong>£${p.net_profit.toFixed(2)}</strong></td>
+            <td>${savBadge}</td>
+          </tr>
+        `;
+      }
+    }
+
+    simulationContainer.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
+        <div>
+          <div style="display:flex; align-items:center; gap:0.6rem;">
+            <h3 style="margin:0; font-family:var(--font-serif); font-size:1.25rem;">What the App Would Have Saved</h3>
+            <span class="badge badge-accent" style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em;">${window.LoafAPI.escape(simLabel)}</span>
+          </div>
+          <p style="margin:2px 0 0; font-size:0.85rem; color:var(--text-secondary);">
+            60-day historical replay comparing ordering strategies against true customer demand.
+          </p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Ordering Policy</th>
+              <th>Total Baked</th>
+              <th>Unsold Waste</th>
+              <th>Unmet Demand (Lost Sales)</th>
+              <th>Net Profit</th>
+              <th>Savings vs Baseline</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderWasteTable(data) {
+    if (!wasteContainer) return;
+    const items = data.items || [];
+    const summary = data.summary || {};
+
+    let rowsHtml = "";
+    if (items.length === 0) {
+      rowsHtml = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:1rem;">No waste records logged over the last 4 weeks.</td></tr>`;
+    } else {
+      for (const it of items) {
+        rowsHtml += `
+          <tr>
+            <td><strong>${window.LoafAPI.escape(it.item_name)}</strong></td>
+            <td>${it.total_baked}</td>
+            <td>${it.total_sold}</td>
+            <td style="color:var(--alert);">${it.total_wasted}</td>
+            <td>${it.total_leftover}</td>
+            <td><strong>${it.total_loss_units}</strong></td>
+            <td>£${it.waste_cost.toFixed(2)}</td>
+            <td><span class="badge ${it.waste_rate_pct > 15 ? 'badge-alert' : 'badge-neutral'}">${it.waste_rate_pct}%</span></td>
+          </tr>
+        `;
+      }
+      // Add summary row
+      if (summary.total_baked > 0) {
+        rowsHtml += `
+          <tr style="background:var(--bg-surface-alt); font-weight:600; border-top:2px solid var(--border-color);">
+            <td>Shop Total (4 Weeks)</td>
+            <td>${summary.total_baked}</td>
+            <td>${summary.total_sold}</td>
+            <td style="color:var(--alert);">${summary.total_wasted}</td>
+            <td>${summary.total_leftover}</td>
+            <td><strong>${summary.total_loss_units}</strong></td>
+            <td>£${summary.total_waste_cost.toFixed(2)}</td>
+            <td><span class="badge ${summary.waste_rate_pct > 15 ? 'badge-alert' : 'badge-ok'}">${summary.waste_rate_pct}%</span></td>
+          </tr>
+        `;
+      }
+    }
+
+    wasteContainer.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+        <div>
+          <h3 style="margin:0; font-family:var(--font-serif); font-size:1.25rem;">4-Week Waste & Leftover Report</h3>
+          <p style="margin:2px 0 0; font-size:0.85rem; color:var(--text-secondary);">
+            Logged discard and unsold carry-over quantities over the last 28 days.
+          </p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Baked</th>
+              <th>Sold</th>
+              <th>Logged Wasted</th>
+              <th>Leftover</th>
+              <th>Total Loss</th>
+              <th>Loss Cost</th>
+              <th>Waste Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderSvgChart(dailyData, item) {
+    if (!dailyData || dailyData.length === 0) {
+      window.LoafAPI.showEmpty(
+        chartWrapper,
+        "No data for this time period",
+        "Generate forecasts and log daily sales to view the accuracy chart."
+      );
+      return;
+    }
+
+    const width = 800;
+    const height = 280;
+    const padding = { top: 30, right: 25, bottom: 40, left: 55 };
+    const chartW = width - padding.left - padding.right;
+    const chartH = height - padding.top - padding.bottom;
+
+    let maxVal = 10;
+    dailyData.forEach(d => {
+      maxVal = Math.max(maxVal, d.forecast_qty || 0, d.actual_sold || 0);
+    });
+    maxVal = Math.ceil(maxVal * 1.15);
+
+    const n = dailyData.length;
+    const groupW = chartW / n;
+    const barW = Math.max(6, Math.min(24, groupW * 0.28));
+    const gap = 3;
+
+    function getY(val) {
+      return padding.top + chartH - (val / maxVal) * chartH;
+    }
+    function getH(val) {
+      return (val / maxVal) * chartH;
+    }
+
+    let gridLinesSvg = "";
+    const yTicks = 4;
+    for (let i = 0; i <= yTicks; i++) {
+      const val = Math.round((maxVal / yTicks) * i);
+      const y = getY(val);
+      gridLinesSvg += `
+        <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="var(--chart-grid)" stroke-dasharray="${i === 0 ? "none" : "3,3"}" />
+        <text x="${padding.left - 8}" y="${y + 4}" font-size="11" fill="var(--text-muted)" text-anchor="end">${val}</text>
+      `;
+    }
+
+    let barsSvg = "";
+    dailyData.forEach((d, idx) => {
+      const groupCenter = padding.left + idx * groupW + groupW / 2;
+      const xForecast = groupCenter - barW - gap / 2;
+      const xActual = groupCenter + gap / 2;
+
+      const fH = getH(d.forecast_qty || 0);
+      const aH = getH(d.actual_sold || 0);
+      const fY = getY(d.forecast_qty || 0);
+      const aY = getY(d.actual_sold || 0);
+
+      barsSvg += `
+        <g class="chart-group">
+          <rect x="${xForecast}" y="${fY}" width="${barW}" height="${fH}" fill="var(--chart-forecast)" rx="3">
+            <title>Forecast: ${d.forecast_qty} units on ${d.date}</title>
+          </rect>
+          <rect x="${xActual}" y="${aY}" width="${barW}" height="${aH}" fill="var(--chart-actual)" rx="3">
+            <title>Actual Sold: ${d.actual_sold} units on ${d.date}</title>
+          </rect>
+          <text x="${groupCenter}" y="${height - 12}" font-size="10" fill="var(--text-secondary)" text-anchor="middle" font-weight="500">
+            ${window.LoafAPI.escape(d.day_name)} ${window.LoafAPI.escape(d.date.slice(5))}
+          </text>
+        </g>
+      `;
+    });
+
+    chartWrapper.innerHTML = `
+      <div class="chart-svg-wrapper">
+        <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+          ${gridLinesSvg}
+          ${barsSvg}
+        </svg>
+      </div>
+    `;
+  }
+
+  function renderTable(records) {
+    if (!records || records.length === 0) {
+      tableContainer.innerHTML = "";
+      return;
+    }
+
+    let html = `
+      <h3 style="margin: 2rem 0 0.85rem; font-family:var(--font-serif); font-size:1.25rem;">Daily Breakdown (Forecast vs Actual)</h3>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Item</th>
+              <th>Forecast</th>
+              <th>Actual Sold</th>
+              <th>Variance</th>
+              <th>Baked</th>
+              <th>Wasted</th>
+              <th>Sold Out</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    for (const r of records) {
+      const fText = r.forecast_qty !== null ? `<strong>${r.forecast_qty}</strong>` : `<span style="color:var(--text-muted)">—</span>`;
+      const sText = r.actual_sold !== null ? `<strong>${r.actual_sold}</strong>` : `<span style="color:var(--text-muted)">—</span>`;
+      const bText = r.baked_qty !== null ? `${r.baked_qty}` : `<span style="color:var(--text-muted)">—</span>`;
+      const wText = r.wasted_qty !== null && r.wasted_qty > 0
+        ? `<span class="badge badge-alert">${r.wasted_qty}</span>`
+        : r.wasted_qty === 0 ? "0" : `<span style="color:var(--text-muted)">—</span>`;
+
+      let diffBadge = `<span style="color:var(--text-muted)">—</span>`;
+      if (r.difference !== null) {
+        if (r.difference > 0) {
+          diffBadge = `<span class="badge badge-accent">+${r.difference} (under-forecast)</span>`;
+        } else if (r.difference < 0) {
+          diffBadge = `<span class="badge badge-alert">${r.difference} (over-forecast)</span>`;
+        } else {
+          diffBadge = `<span class="badge badge-ok">Exact match (0)</span>`;
+        }
+      }
+
+      const soldOutBadge = r.sold_out
+        ? `<span class="badge badge-accent">Yes</span>`
+        : `<span class="badge badge-neutral">No</span>`;
+
+      html += `
+        <tr>
+          <td><strong>${window.LoafAPI.escape(r.date)}</strong></td>
+          <td>${window.LoafAPI.escape(r.item_name)}</td>
+          <td>${fText}</td>
+          <td>${sText}</td>
+          <td>${diffBadge}</td>
+          <td>${bText}</td>
+          <td>${wText}</td>
+          <td>${soldOutBadge}</td>
+        </tr>
+      `;
+    }
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    tableContainer.innerHTML = html;
+  }
+
+  populateItems().then(() => {
+    loadReports();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Bakery Setup & Onboarding — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div style="max-width: 680px; margin: 1.5rem auto; width: 100%;">
+  <div class="card" style="padding: 2rem 1.5rem;">
+    <div style="margin-bottom: 1.75rem;">
+      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+        <span style="font-size: 2rem;">🏪</span>
+        <div>
+          <h2 style="font-family: var(--font-serif); font-size: 1.6rem; color: var(--text-primary); margin: 0;">
+            Welcome to Loaf Ledger!
+          </h2>
+          <p style="font-size: 0.88rem; color: var(--text-secondary); margin: 0;">
+            Step 2: Tell us about your bakery and your starter products.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    {% if error %}
+    <div class="info-banner" style="background-color: var(--alert-bg); border-color: var(--alert); color: var(--alert-text); margin-bottom: 1.25rem;">
+      <span class="info-banner-icon">⚠️</span>
+      <div>{{ error }}</div>
+    </div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('auth.onboarding') }}" id="onboarding-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <!-- Section 1: Bakery Location -->
+      <div style="margin-bottom: 2rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1.5rem;">
+        <h3 style="font-family: var(--font-serif); font-size: 1.2rem; color: var(--text-primary); margin-bottom: 1rem;">
+          1. Bakery Details &amp; Weather Location
+        </h3>
+
+        <div class="form-grid">
+          <div class="form-group full-span">
+            <label class="form-label" for="onboarding-name-input">Bakery Name *</label>
+            <input type="text" id="onboarding-name-input" name="name" class="input-field input-lg" placeholder="e.g. Flour &amp; Stone Bakery" required autofocus>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="onboarding-city-input">City / Town</label>
+            <input type="text" id="onboarding-city-input" name="city" class="input-field input-lg" placeholder="e.g. Bath">
+          </div>
+
+          <div class="form-group" style="justify-content: flex-end;">
+            <button type="button" id="detect-location-btn" class="btn btn-secondary input-lg" style="width: 100%; gap: 0.5rem;">
+              <span>📍</span> Use My Current Location
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="onboarding-lat-input">Latitude *</label>
+            <input type="number" step="0.0001" id="onboarding-lat-input" name="lat" class="input-field input-lg" value="{{ default_lat }}" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="onboarding-lon-input">Longitude *</label>
+            <input type="number" step="0.0001" id="onboarding-lon-input" name="lon" class="input-field input-lg" value="{{ default_lon }}" required>
+          </div>
+        </div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+          Coordinates are used to fetch accurate Open-Meteo temperature and rainfall forecasts.
+        </p>
+      </div>
+
+      <!-- Section 2: Initial Products -->
+      <div style="margin-bottom: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h3 style="font-family: var(--font-serif); font-size: 1.2rem; color: var(--text-primary); margin: 0;">
+            2. Initial Bakery Items
+          </h3>
+          <button type="button" id="add-item-row-btn" class="btn btn-secondary btn-sm" style="min-height: 40px;">
+            + Add Another Item
+          </button>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+          Add a few products to begin tracking stock and generating bake recommendations immediately.
+        </p>
+
+        <div id="items-rows-container">
+          <!-- Row 1 -->
+          <div class="item-onboarding-row card" style="padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-surface-alt);">
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.75rem; align-items: flex-end;">
+              <div class="form-group">
+                <label class="form-label">Item Name *</label>
+                <input type="text" name="item_name[]" class="input-field" value="Croissant" required placeholder="e.g. Croissant">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Stock *</label>
+                <input type="number" name="item_stock[]" class="input-field" value="20" min="0" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Shelf Life *</label>
+                <input type="number" name="item_shelf_life[]" class="input-field" value="1" min="1" required>
+              </div>
+              <div>
+                <button type="button" class="btn btn-danger btn-sm remove-row-btn" style="min-height: 40px; padding: 0.4rem 0.6rem;" title="Remove item">
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 2 -->
+          <div class="item-onboarding-row card" style="padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-surface-alt);">
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.75rem; align-items: flex-end;">
+              <div class="form-group">
+                <label class="form-label">Item Name *</label>
+                <input type="text" name="item_name[]" class="input-field" value="Sourdough Loaf" required placeholder="e.g. Sourdough Loaf">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Stock *</label>
+                <input type="number" name="item_stock[]" class="input-field" value="15" min="0" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Shelf Life *</label>
+                <input type="number" name="item_shelf_life[]" class="input-field" value="2" min="1" required>
+              </div>
+              <div>
+                <button type="button" class="btn btn-danger btn-sm remove-row-btn" style="min-height: 40px; padding: 0.4rem 0.6rem;" title="Remove item">
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; min-height: 50px; font-size: 1.1rem; font-weight: 600;">
+        Complete Onboarding &amp; Go to Bake Plan 🥖
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const detectBtn = document.getElementById("detect-location-btn");
+  const latInput = document.getElementById("onboarding-lat-input");
+  const lonInput = document.getElementById("onboarding-lon-input");
+  const addRowBtn = document.getElementById("add-item-row-btn");
+  const itemsContainer = document.getElementById("items-rows-container");
+
+  // Geolocation detection
+  if (detectBtn && navigator.geolocation) {
+    detectBtn.addEventListener("click", () => {
+      detectBtn.disabled = true;
+      detectBtn.innerHTML = "<span>⏳</span> Detecting location...";
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latInput.value = position.coords.latitude.toFixed(4);
+          lonInput.value = position.coords.longitude.toFixed(4);
+          detectBtn.disabled = false;
+          detectBtn.innerHTML = "<span>✓</span> Location Detected";
+          window.LoafAPI.showToast("Coordinates updated from your browser.", "success");
+        },
+        (error) => {
+          detectBtn.disabled = false;
+          detectBtn.innerHTML = "<span>📍</span> Use My Current Location";
+          window.LoafAPI.showToast("Could not detect location. You can enter coordinates manually.", "error");
+        },
+        { timeout: 10000, enableHighAccuracy: true }
+      );
+    });
+  }
+
+  // Dynamic row addition
+  if (addRowBtn && itemsContainer) {
+    addRowBtn.addEventListener("click", () => {
+      const rowDiv = document.createElement("div");
+      rowDiv.className = "item-onboarding-row card";
+      rowDiv.style.cssText = "padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-surface-alt);";
+      rowDiv.innerHTML = `
+        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.75rem; align-items: flex-end;">
+          <div class="form-group">
+            <label class="form-label">Item Name *</label>
+            <input type="text" name="item_name[]" class="input-field" placeholder="e.g. Baguette" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stock *</label>
+            <input type="number" name="item_stock[]" class="input-field" value="10" min="0" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Shelf Life *</label>
+            <input type="number" name="item_shelf_life[]" class="input-field" value="1" min="1" required>
+          </div>
+          <div>
+            <button type="button" class="btn btn-danger btn-sm remove-row-btn" style="min-height: 40px; padding: 0.4rem 0.6rem;" title="Remove item">
+              ✕
+            </button>
+          </div>
+        </div>
+      `;
+      itemsContainer.appendChild(rowDiv);
+    });
+  }
+
+  // Row removal delegation
+  if (itemsContainer) {
+    itemsContainer.addEventListener("click", (e) => {
+      if (e.target.closest(".remove-row-btn")) {
+        const rows = itemsContainer.querySelectorAll(".item-onboarding-row");
+        if (rows.length <= 1) {
+          window.LoafAPI.showToast("Keep at least one starter item.", "info");
+          return;
+        }
+        e.target.closest(".item-onboarding-row").remove();
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}
+

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error (500) — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:550px; margin:3rem auto; text-align:center; padding:2.5rem 2rem;">
+  <div style="font-size:3.5rem; margin-bottom:1rem;">🔥🥖</div>
+  <h2 class="screen-title" style="margin-bottom:0.5rem;">500 — Something Burnt in the Oven</h2>
+  <p style="color:var(--text-secondary); margin-bottom:1.75rem; line-height:1.5;">
+    An unexpected error occurred while processing your request.
+    Our team has been notified and is fixing the recipe. Please try again shortly.
+  </p>
+  <div style="display:flex; justify-content:center; gap:0.75rem;">
+    <a href="{{ url_for('plan_page') if current_user.is_authenticated else url_for('auth.login') }}" class="btn btn-primary" style="min-height:44px; text-decoration:none; display:inline-flex; align-items:center;">
+      Return to Bakery ➔
+    </a>
+  </div>
+</div>
+{% endblock %}
+

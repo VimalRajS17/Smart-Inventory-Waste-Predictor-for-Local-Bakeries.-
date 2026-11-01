@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block title %}Today's Production & Sales — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="screen-header">
+  <div>
+    <h2 class="screen-title">Today's Production & Sales</h2>
+    <p class="screen-subtitle">Record daily quantities sold, baked, and wasted to update the forecast model.</p>
+  </div>
+</div>
+
+<!-- Daily Log Form Card with Big Touch Targets -->
+<div class="card today-form-card">
+  <h3 style="font-family:var(--font-serif); font-size:1.25rem; margin-bottom:1.15rem; color:var(--text-primary);">
+    Record Daily Log
+  </h3>
+  <form id="today-log-form">
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label" for="today-item-select">Bakery Item *</label>
+        <select id="today-item-select" class="select-field input-lg" required>
+          <option value="">Loading bakery items...</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="today-date-input">Log Date *</label>
+        <input type="date" id="today-date-input" class="input-field input-lg" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="today-sold-input">Sold Quantity (units)</label>
+        <input type="number" id="today-sold-input" class="input-field input-lg" min="0" placeholder="e.g. 35" inputmode="numeric">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="today-baked-input">Baked Quantity (units)</label>
+        <input type="number" id="today-baked-input" class="input-field input-lg" min="0" placeholder="e.g. 40" inputmode="numeric">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="today-wasted-input">Wasted Quantity (units)</label>
+        <input type="number" id="today-wasted-input" class="input-field input-lg" min="0" placeholder="e.g. 5" inputmode="numeric">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="today-leftover-input">End-of-day Leftover (units)</label>
+        <input type="number" id="today-leftover-input" class="input-field input-lg" min="0" placeholder="e.g. 3" inputmode="numeric">
+      </div>
+
+      <div class="form-group">
+        <label class="form-checkbox-label" for="today-sold-out-checkbox">
+          <input type="checkbox" id="today-sold-out-checkbox">
+          <span>Sold out before closing?</span>
+        </label>
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="submit" id="today-submit-btn" class="btn btn-primary btn-lg">
+        Save Daily Log
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Recent Production Logs Section -->
+<div style="display:flex; justify-content:space-between; align-items:center; margin:2rem 0 0.85rem; flex-wrap:wrap; gap:0.5rem;">
+  <h3 style="font-family:var(--font-serif); font-size:1.25rem; color:var(--text-primary); margin:0;">
+    Recent Production & Sales Logs
+  </h3>
+  <button id="refresh-logs-btn" class="btn btn-secondary" style="min-height:44px;" type="button" aria-label="Refresh daily logs">
+    ↻ Refresh Logs
+  </button>
+</div>
+
+<div id="recent-logs-container"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const form = document.getElementById("today-log-form");
+  const itemSelect = document.getElementById("today-item-select");
+  const dateInput = document.getElementById("today-date-input");
+  const soldInput = document.getElementById("today-sold-input");
+  const bakedInput = document.getElementById("today-baked-input");
+  const wastedInput = document.getElementById("today-wasted-input");
+  const leftoverInput = document.getElementById("today-leftover-input");
+  const soldOutCheckbox = document.getElementById("today-sold-out-checkbox");
+  const submitBtn = document.getElementById("today-submit-btn");
+  const logsContainer = document.getElementById("recent-logs-container");
+  const refreshLogsBtn = document.getElementById("refresh-logs-btn");
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  if (dateInput) dateInput.value = todayStr;
+
+  if (form) form.addEventListener("submit", handleSubmit);
+  if (refreshLogsBtn) refreshLogsBtn.addEventListener("click", loadLogs);
+
+  async function populateItems() {
+    try {
+      const items = await window.LoafAPI.fetch("/api/items");
+      let html = `<option value="">Select a bakery item...</option>`;
+      items.forEach(it => {
+        html += `<option value="${it.id}">${window.LoafAPI.escape(it.name)} (Stock: ${it.current_stock ?? 0})</option>`;
+      });
+      itemSelect.innerHTML = html;
+    } catch (err) {
+      itemSelect.innerHTML = `<option value="">Could not load items (${window.LoafAPI.escape(err.message)})</option>`;
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const itemId = itemSelect.value;
+    const dateVal = dateInput.value;
+    const soldVal = soldInput.value.trim();
+    const bakedVal = bakedInput.value.trim();
+    const wastedVal = wastedInput.value.trim();
+    const leftoverVal = leftoverInput ? leftoverInput.value.trim() : "";
+    const soldOut = soldOutCheckbox.checked;
+
+    if (!itemId) {
+      window.LoafAPI.showToast("Please select a bakery item.", "error");
+      return;
+    }
+    if (!dateVal) {
+      window.LoafAPI.showToast("Please choose a date.", "error");
+      return;
+    }
+
+    const payload = {
+      item_id: parseInt(itemId, 10),
+      date: dateVal,
+      sold_out: soldOut,
+    };
+
+    if (soldVal !== "") payload.sold = parseInt(soldVal, 10);
+    if (bakedVal !== "") payload.baked = parseInt(bakedVal, 10);
+    if (wastedVal !== "") payload.wasted = parseInt(wastedVal, 10);
+    if (leftoverVal !== "") payload.leftover = parseInt(leftoverVal, 10);
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Saving Log...";
+
+    try {
+      await window.LoafAPI.fetch("/api/daily-log", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      const selectedItemName = itemSelect.options[itemSelect.selectedIndex]?.text || "item";
+      window.LoafAPI.showToast(`Logged day for ${selectedItemName}. Tomorrow's bake plan has been updated!`, "success");
+
+      // Reset numeric inputs
+      soldInput.value = "";
+      bakedInput.value = "";
+      wastedInput.value = "";
+      if (leftoverInput) leftoverInput.value = "";
+      soldOutCheckbox.checked = false;
+
+      await loadLogs();
+      await populateItems();
+    } catch (err) {
+      window.LoafAPI.showToast(err.message || "Failed to save daily log.", "error");
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.innerText = "Save Daily Log";
+    }
+  }
+
+  async function loadLogs() {
+    window.LoafAPI.showLoading(logsContainer, "Loading recent production logs...");
+
+    try {
+      const logs = await window.LoafAPI.fetch("/api/daily-log");
+      renderLogs(logs);
+    } catch (err) {
+      window.LoafAPI.showError(logsContainer, err.message || "Could not retrieve daily logs.", loadLogs);
+    }
+  }
+
+  function renderLogs(logs) {
+    if (!logs || logs.length === 0) {
+      window.LoafAPI.showEmpty(
+        logsContainer,
+        "No production logs recorded yet",
+        "Use the form above to record daily sales and production numbers.",
+      );
+      return;
+    }
+
+    const recent = logs.slice(0, 20);
+    let html = `
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Item</th>
+              <th>Sold</th>
+              <th>Baked</th>
+              <th>Wasted</th>
+              <th>Leftover</th>
+              <th>Sold Out</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    for (const log of recent) {
+      const soldBadge = log.sold !== null ? `<strong>${log.sold}</strong>` : `<span style="color:var(--text-muted)">—</span>`;
+      const bakedBadge = log.baked !== null ? `${log.baked}` : `<span style="color:var(--text-muted)">—</span>`;
+      const wastedBadge = log.wasted !== null && log.wasted > 0
+        ? `<span class="badge badge-alert">${log.wasted}</span>`
+        : log.wasted === 0 ? "0" : `<span style="color:var(--text-muted)">—</span>`;
+      const leftoverBadge = log.leftover !== null
+        ? `${log.leftover}`
+        : `<span style="color:var(--text-muted)">—</span>`;
+
+      const soldOutBadge = log.sold_out
+        ? `<span class="badge badge-accent">Yes</span>`
+        : `<span class="badge badge-neutral">No</span>`;
+
+      html += `
+        <tr>
+          <td><strong>${window.LoafAPI.escape(log.date)}</strong></td>
+          <td><strong>${window.LoafAPI.escape(log.item_name || "Item #" + log.item_id)}</strong></td>
+          <td>${soldBadge}</td>
+          <td>${bakedBadge}</td>
+          <td>${wastedBadge}</td>
+          <td>${leftoverBadge}</td>
+          <td>${soldOutBadge}</td>
+        </tr>
+      `;
+    }
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    logsContainer.innerHTML = html;
+  }
+
+  // Initial load
+  populateItems();
+  loadLogs();
+})();
+</script>
+{% endblock %}
+

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Sign In — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div style="max-width: 440px; margin: 2rem auto; width: 100%;">
+  <div class="card" style="padding: 2rem 1.5rem;">
+    <div style="text-align: center; margin-bottom: 1.5rem;">
+      <span style="font-size: 2.5rem; display: block; margin-bottom: 0.5rem;">🥖</span>
+      <h2 style="font-family: var(--font-serif); font-size: 1.6rem; color: var(--text-primary); margin-bottom: 0.35rem;">
+        Welcome to Loaf Ledger
+      </h2>
+      <p style="font-size: 0.88rem; color: var(--text-secondary);">
+        Sign in to manage your bakery's bake plan and waste reduction.
+      </p>
+    </div>
+
+    {% if error %}
+    <div class="info-banner" style="background-color: var(--alert-bg); border-color: var(--alert); color: var(--alert-text); margin-bottom: 1.25rem;">
+      <span class="info-banner-icon">⚠️</span>
+      <div>{{ error }}</div>
+    </div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('auth.login', next=request.args.get('next')) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-group" style="margin-bottom: 1.15rem;">
+        <label class="form-label" for="login-email-input">Email Address *</label>
+        <input type="email" id="login-email-input" name="email" class="input-field input-lg" placeholder="baker@example.com" value="{{ email or '' }}" required autocomplete="email" autofocus>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 1.25rem;">
+        <label class="form-label" for="login-password-input">Password *</label>
+        <input type="password" id="login-password-input" name="password" class="input-field input-lg" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem;">
+        <label class="form-checkbox-label" for="login-remember-checkbox" style="font-size: 0.85rem; min-height: 36px;">
+          <input type="checkbox" id="login-remember-checkbox" name="remember" value="1" checked>
+          <span>Keep me signed in</span>
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; min-height: 48px; font-weight: 600;">
+        Sign In
+      </button>
+    </form>
+
+    <div style="text-align: center; margin-top: 1.5rem; font-size: 0.88rem; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+      Don't have an account?
+      <a href="{{ url_for('auth.register') }}" style="font-weight: 600; color: var(--accent);">Register your bakery</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

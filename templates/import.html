@@ -1,0 +1,462 @@
+{% extends "base.html" %}
+
+{% block title %}Import Sales Data — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="screen-header">
+  <div>
+    <h2 class="screen-title">Import Sales History</h2>
+    <p class="screen-subtitle">Upload past sales CSV files to train demand forecasts and compare performance over time.</p>
+  </div>
+</div>
+
+<div class="card" style="max-width: 800px; margin: 0 auto 1.5rem auto;">
+  <form id="import-form">
+    <!-- File Dropzone -->
+    <div class="form-group">
+      <label for="csv-file-input" style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
+        Select CSV File (Max 2 MB)
+      </label>
+      <div id="dropzone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 2rem 1.5rem; text-align: center; background: var(--bg-surface-alt); cursor: pointer; transition: border-color 0.2s, background-color 0.2s;">
+        <span style="font-size: 2.2rem; display: block; margin-bottom: 0.5rem;">📄</span>
+        <div id="dropzone-text" style="font-size: 1rem; color: var(--text-primary); font-weight: 500;">
+          Click to browse or drag and drop a CSV file here
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;">
+          Supported format: .csv (up to 2 MB)
+        </div>
+        <input type="file" id="csv-file-input" name="file" accept=".csv,text/csv" style="display: none;">
+      </div>
+      <div id="file-info-pill" style="display: none; margin-top: 0.75rem; padding: 0.5rem 0.85rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.85rem; align-items: center; justify-content: space-between;">
+        <span id="file-name-size" style="font-weight: 500;"></span>
+        <button type="button" id="remove-file-btn" class="btn btn-secondary btn-sm" style="padding: 0.2rem 0.5rem; min-height: 28px;">Change</button>
+      </div>
+    </div>
+
+    <!-- Dynamic Column Mapping Section (Visible once file is picked) -->
+    <div id="mapping-section" style="display: none; border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 1.25rem;">
+      <h3 style="font-size: 1.05rem; margin-bottom: 0.5rem; color: var(--text-primary);">Column Mapping</h3>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+        We matched your CSV headers below. Adjust the mapping if your file uses different column names.
+      </p>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="map-date" style="font-size: 0.85rem; font-weight: 600;">Date Column *</label>
+          <select id="map-date" name="col_date" class="select-field" style="width: 100%; min-height: 44px;"></select>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="map-item" style="font-size: 0.85rem; font-weight: 600;">Item Column *</label>
+          <select id="map-item" name="col_item" class="select-field" style="width: 100%; min-height: 44px;"></select>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="map-sold" style="font-size: 0.85rem; font-weight: 600;">Sold Column *</label>
+          <select id="map-sold" name="col_sold" class="select-field" style="width: 100%; min-height: 44px;"></select>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="map-baked" style="font-size: 0.85rem; font-weight: 600;">Baked Column (Optional)</label>
+          <select id="map-baked" name="col_baked" class="select-field" style="width: 100%; min-height: 44px;"></select>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="map-wasted" style="font-size: 0.85rem; font-weight: 600;">Wasted Column (Optional)</label>
+          <select id="map-wasted" name="col_wasted" class="select-field" style="width: 100%; min-height: 44px;"></select>
+        </div>
+      </div>
+
+      <!-- Catalogue Auto-Expansion Option -->
+      <div style="display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.75rem 0.9rem; background: var(--bg-surface-alt); border-radius: var(--radius-md); margin-bottom: 1.5rem;">
+        <input type="checkbox" id="create-missing-items" name="create_missing_items" checked style="width: 18px; height: 18px; margin-top: 2px;">
+        <label for="create-missing-items" style="font-size: 0.88rem; color: var(--text-primary); cursor: pointer;">
+          <strong>Add new items automatically</strong><br>
+          <span style="font-size: 0.8rem; color: var(--text-secondary);">If an item in the CSV does not exist in your bakery catalogue, create it automatically.</span>
+        </label>
+      </div>
+
+      <button type="submit" id="submit-import-btn" class="btn btn-primary" style="width: 100%; min-height: 44px; font-weight: 600; font-size: 0.95rem;">
+        Start Import & Weather Sync
+      </button>
+    </div>
+  </form>
+
+  <!-- Progress / Loading Indicator -->
+  <div id="import-loading" style="display: none; padding: 2rem 1rem;"></div>
+
+  <!-- Error Alert -->
+  <div id="import-error" class="alert alert-danger" style="display: none; margin-top: 1rem;"></div>
+</div>
+
+<!-- Import Results & Summary Report Card -->
+<div id="import-report-card" class="card" style="display: none; max-width: 800px; margin: 0 auto 2rem auto;">
+  <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.25rem;">
+    <h3 style="font-size: 1.15rem; color: var(--text-primary); margin: 0;">Import Results</h3>
+    <span id="import-status-badge" class="badge" style="background: var(--color-success-bg, #e6f4ea); color: var(--color-success, #137333); font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+      Complete
+    </span>
+  </div>
+
+  <!-- Summary KPI Cards -->
+  <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 1.5rem;">
+    <div class="kpi-card">
+      <div class="kpi-label">Rows Imported</div>
+      <div id="res-imported-count" class="kpi-value" style="color: var(--color-success, #137333);">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Rows Skipped</div>
+      <div id="res-skipped-count" class="kpi-value" style="color: var(--color-warning, #e37400);">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Items Created</div>
+      <div id="res-items-created" class="kpi-value">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Weather Synced</div>
+      <div id="res-weather-synced" class="kpi-value">0 days</div>
+    </div>
+  </div>
+
+  <!-- Skipped Rows Table (Visible if skipped > 0) -->
+  <div id="skipped-rows-section" style="display: none; margin-bottom: 1.5rem;">
+    <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text-primary);">
+      Skipped Rows Details
+    </h4>
+    <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+      The following rows had formatting issues, duplicates, or missing catalogue items and were skipped:
+    </p>
+    <div style="max-height: 260px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <table class="data-table" style="width: 100%; font-size: 0.82rem; margin: 0;">
+        <thead>
+          <tr>
+            <th style="width: 80px; text-align: center;">Row #</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody id="skipped-rows-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Post-Import Action Buttons -->
+  <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: flex-end; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+    <button type="button" id="import-another-btn" class="btn btn-secondary" style="min-height: 44px;">
+      Import Another File
+    </button>
+    <a id="view-reports-link" href="{{ url_for('reports_page') }}" class="btn btn-primary" style="min-height: 44px; display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none;">
+      <span>View in Reports</span> ➔
+    </a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("csv-file-input");
+  const dropzoneText = document.getElementById("dropzone-text");
+  const fileInfoPill = document.getElementById("file-info-pill");
+  const fileNameSize = document.getElementById("file-name-size");
+  const removeFileBtn = document.getElementById("remove-file-btn");
+
+  const mappingSection = document.getElementById("mapping-section");
+  const mapDate = document.getElementById("map-date");
+  const mapItem = document.getElementById("map-item");
+  const mapSold = document.getElementById("map-sold");
+  const mapBaked = document.getElementById("map-baked");
+  const mapWasted = document.getElementById("map-wasted");
+
+  const importForm = document.getElementById("import-form");
+  const submitBtn = document.getElementById("submit-import-btn");
+  const loadingContainer = document.getElementById("import-loading");
+  const errorContainer = document.getElementById("import-error");
+
+  const reportCard = document.getElementById("import-report-card");
+  const resImported = document.getElementById("res-imported-count");
+  const resSkipped = document.getElementById("res-skipped-count");
+  const resCreated = document.getElementById("res-items-created");
+  const resWeather = document.getElementById("res-weather-synced");
+  const skippedSection = document.getElementById("skipped-rows-section");
+  const skippedTbody = document.getElementById("skipped-rows-tbody");
+  const viewReportsLink = document.getElementById("view-reports-link");
+  const importAnotherBtn = document.getElementById("import-another-btn");
+
+  let selectedFile = null;
+
+  // Drag and drop event handlers
+  dropzone.addEventListener("click", () => fileInput.click());
+
+  dropzone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropzone.style.borderColor = "var(--primary-color)";
+    dropzone.style.backgroundColor = "var(--bg-surface)";
+  });
+
+  dropzone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dropzone.style.borderColor = "var(--border-color)";
+    dropzone.style.backgroundColor = "var(--bg-surface-alt)";
+  });
+
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.style.borderColor = "var(--border-color)";
+    dropzone.style.backgroundColor = "var(--bg-surface-alt)";
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileSelected(e.dataTransfer.files[0]);
+    }
+  });
+
+  fileInput.addEventListener("change", (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFileSelected(e.target.files[0]);
+    }
+  });
+
+  removeFileBtn.addEventListener("click", resetFileSelection);
+  importAnotherBtn.addEventListener("click", resetFileSelection);
+
+  function resetFileSelection() {
+    selectedFile = null;
+    fileInput.value = "";
+    fileInfoPill.style.display = "none";
+    dropzone.style.display = "block";
+    mappingSection.style.display = "none";
+    errorContainer.style.display = "none";
+    reportCard.style.display = "none";
+    importForm.style.display = "block";
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  }
+
+  function handleFileSelected(file) {
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      showError("Please select a valid CSV file (.csv).");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      showError("File size exceeds 2 MB limit. Please select a smaller CSV file.");
+      return;
+    }
+
+    selectedFile = file;
+    errorContainer.style.display = "none";
+    dropzone.style.display = "none";
+    fileNameSize.textContent = `${file.name} (${formatBytes(file.size)})`;
+    fileInfoPill.style.display = "flex";
+
+    // Read header row to populate column mappings
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      const text = evt.target.result;
+      const firstLine = text.split(/\r\n|\n|\r/)[0];
+      const headers = parseCSVLine(firstLine);
+
+      if (headers.length === 0) {
+        showError("The selected CSV file has an empty header row.");
+        return;
+      }
+
+      populateMappingDropdowns(headers);
+      mappingSection.style.display = "block";
+    };
+    reader.onerror = function() {
+      showError("Could not read CSV file headers.");
+    };
+
+    // Read first 16 KB to inspect header row quickly
+    const slice = file.slice(0, 16384);
+    reader.readAsText(slice, "utf-8");
+  }
+
+  function parseCSVLine(line) {
+    const values = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (c === ',' && !inQuotes) {
+        values.push(cur.trim());
+        cur = "";
+      } else {
+        cur += c;
+      }
+    }
+    values.push(cur.trim());
+    return values.filter(h => h.length > 0);
+  }
+
+  function populateMappingDropdowns(headers) {
+    const createOptions = (includeNone = false) => {
+      let html = includeNone ? '<option value="">[None]</option>' : '';
+      for (const h of headers) {
+        html += `<option value="${escapeHTML(h)}">${escapeHTML(h)}</option>`;
+      }
+      return html;
+    };
+
+    mapDate.innerHTML = createOptions(false);
+    mapItem.innerHTML = createOptions(false);
+    mapSold.innerHTML = createOptions(false);
+    mapBaked.innerHTML = createOptions(true);
+    mapWasted.innerHTML = createOptions(true);
+
+    // Auto-select best matches
+    const lowerHeaders = headers.map(h => h.toLowerCase());
+
+    const findMatch = (candidates) => {
+      for (const cand of candidates) {
+        const idx = lowerHeaders.indexOf(cand.toLowerCase());
+        if (idx !== -1) return headers[idx];
+      }
+      // Substring match
+      for (const cand of candidates) {
+        const idx = lowerHeaders.findIndex(h => h.includes(cand.toLowerCase()));
+        if (idx !== -1) return headers[idx];
+      }
+      return headers[0];
+    };
+
+    mapDate.value = findMatch(["date", "datetime", "timestamp", "day"]);
+    mapItem.value = findMatch(["item", "article", "product", "product_name"]);
+    mapSold.value = findMatch(["sold", "quantity", "qty", "units", "sales"]);
+
+    const bakedMatch = lowerHeaders.findIndex(h => h.includes("bake"));
+    if (bakedMatch !== -1) mapBaked.value = headers[bakedMatch];
+
+    const wastedMatch = lowerHeaders.findIndex(h => h.includes("waste"));
+    if (wastedMatch !== -1) mapWasted.value = headers[wastedMatch];
+  }
+
+  function escapeHTML(str) {
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  function showError(msg) {
+    errorContainer.textContent = msg;
+    errorContainer.style.display = "block";
+  }
+
+  // Form Submission
+  importForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      showError("Please select a CSV file first.");
+      return;
+    }
+
+    errorContainer.style.display = "none";
+    reportCard.style.display = "none";
+    mappingSection.style.display = "none";
+    window.LoafAPI.showLoading(loadingContainer, "Importing daily sales records and fetching weather history...");
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    formData.append("col_date", mapDate.value);
+    formData.append("col_item", mapItem.value);
+    formData.append("col_sold", mapSold.value);
+    if (mapBaked.value) formData.append("col_baked", mapBaked.value);
+    if (mapWasted.value) formData.append("col_wasted", mapWasted.value);
+    formData.append("create_missing_items", document.getElementById("create-missing-items").checked ? "true" : "false");
+
+    try {
+      // Send fetch POST with CSRF header
+      const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+      const csrfToken = csrfMeta ? csrfMeta.getAttribute("content") : "";
+
+      const resp = await fetch("/api/import/csv", {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": csrfToken,
+        },
+        body: formData,
+      });
+
+      const res = await resp.json();
+      loadingContainer.style.display = "none";
+
+      if (!resp.ok) {
+        const errorMsg = (res.error && res.error.message) ? res.error.message : "Import failed.";
+        showError(errorMsg);
+        mappingSection.style.display = "block";
+        return;
+      }
+
+      // Display Report Card
+      renderReport(res);
+      importForm.style.display = "none";
+      reportCard.style.display = "block";
+
+      if (window.LoafAPI.showToast) {
+        window.LoafAPI.showToast(`Imported ${res.rows_imported} rows successfully!`, "success");
+      }
+    } catch (err) {
+      loadingContainer.style.display = "none";
+      showError(err.message || "An unexpected error occurred during import.");
+      mappingSection.style.display = "block";
+    }
+  });
+
+  function renderReport(data) {
+    resImported.textContent = (data.rows_imported || 0).toLocaleString();
+    resSkipped.textContent = (data.rows_skipped || 0).toLocaleString();
+    resCreated.textContent = (data.created_items ? data.created_items.length : 0).toLocaleString();
+
+    let weatherDays = 0;
+    if (data.weather_synced && data.weather_synced.days_fetched !== undefined) {
+      weatherDays = data.weather_synced.days_fetched;
+    }
+    resWeather.textContent = `${weatherDays} days`;
+
+    // Render Skipped Rows Table if any skipped
+    if (data.skipped_rows && data.skipped_rows.length > 0) {
+      skippedSection.style.display = "block";
+      skippedTbody.innerHTML = "";
+      data.skipped_rows.forEach(item => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="text-align: center; font-weight: 600;">${item.row}</td>
+          <td style="color: var(--text-secondary);">${escapeHTML(item.reason || "Invalid row")}</td>
+        `;
+        skippedTbody.appendChild(tr);
+      });
+    } else {
+      skippedSection.style.display = "none";
+      skippedTbody.innerHTML = "";
+    }
+
+    // Set View in Reports Link
+    if (data.date_range && data.date_range.end) {
+      viewReportsLink.href = `/reports?to=${encodeURIComponent(data.date_range.end)}&days=7`;
+    } else {
+      viewReportsLink.href = "/reports";
+    }
+  }
+
+})();
+</script>
+{% endblock %}
+

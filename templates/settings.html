@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}Settings & Model Lifecycle — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="screen-header">
+  <div>
+    <h2 class="screen-title">Bakery Settings & Models</h2>
+    <p class="screen-subtitle">Manage bakery configuration, active demand models, and automated retraining.</p>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-bottom:1.5rem;">
+  <!-- Bakery Shop Profile Card -->
+  <div class="card">
+    <h3 style="font-family:var(--font-serif); font-size:1.25rem; margin-bottom:1rem; color:var(--text-primary);">
+      🏪 Bakery Information
+    </h3>
+    <table class="data-table" style="margin-bottom:0;">
+      <tbody>
+        <tr>
+          <td style="width:140px; color:var(--text-secondary); font-weight:600;">Shop Name</td>
+          <td><strong>{{ current_shop.name if current_shop else "—" }}</strong></td>
+        </tr>
+        <tr>
+          <td style="color:var(--text-secondary); font-weight:600;">City</td>
+          <td>{{ current_shop.city if current_shop and current_shop.city else "—" }}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--text-secondary); font-weight:600;">Coordinates</td>
+          <td>
+            {% if current_shop %}
+              {{ "%.4f"|format(current_shop.lat) }}, {{ "%.4f"|format(current_shop.lon) }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td style="color:var(--text-secondary); font-weight:600;">Owner Account</td>
+          <td>{{ current_user.email }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Automated Retraining Info Card -->
+  <div class="card">
+    <h3 style="font-family:var(--font-serif); font-size:1.25rem; margin-bottom:1rem; color:var(--text-primary);">
+      ⏰ Nightly Training Schedule
+    </h3>
+    <p style="font-size:0.9rem; color:var(--text-secondary); line-height:1.5; margin-bottom:1rem;">
+      Loaf Ledger scans for newly recorded logs every night. When a bakery accumulates at least <strong>30 new log rows</strong> since its previous training run, a fresh 4-fold rolling backtest executes automatically.
+    </p>
+    <div style="background:var(--bg-main); padding:0.75rem 1rem; border-radius:6px; border:1px solid var(--border-color); font-size:0.85rem;">
+      <div><strong>Host Cron Command:</strong></div>
+      <code style="display:block; margin-top:0.35rem; word-break:break-all;">flask --app app retrain-all</code>
+    </div>
+  </div>
+</div>
+
+<!-- Demand Model Retraining Card -->
+<div class="card" style="margin-bottom:2rem;">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
+    <div>
+      <h3 style="font-family:var(--font-serif); font-size:1.25rem; margin:0 0 0.25rem; color:var(--text-primary);">
+        🤖 Demand Forecasting Models
+      </h3>
+      <p style="font-size:0.88rem; color:var(--text-secondary); margin:0;">
+        Retrain all candidate algorithms (Naive, Moving Average, Linear Regression, Random Forest, HistGradientBoosting). A model is promoted only if it beats the baseline.
+      </p>
+    </div>
+    <button id="retrain-now-btn" class="btn btn-primary btn-lg" type="button" style="min-height:44px;">
+      ⚡ Retrain Now
+    </button>
+  </div>
+
+  <!-- Retraining Status Box -->
+  <div id="retrain-status-box" class="info-banner" style="display:none; margin-bottom:1.25rem;"></div>
+
+  <!-- Active Models Table -->
+  <h4 style="font-size:0.95rem; font-weight:600; color:var(--text-primary); margin:1.5rem 0 0.5rem;">
+    Current Active Models by Bakery Item
+  </h4>
+  <div id="active-models-container">
+    <div style="color:var(--text-muted); font-size:0.9rem;">Loading active models...</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const retrainBtn = document.getElementById("retrain-now-btn");
+  const statusBox = document.getElementById("retrain-status-box");
+  const modelsContainer = document.getElementById("active-models-container");
+
+  if (retrainBtn) {
+    retrainBtn.addEventListener("click", handleRetrainNow);
+  }
+
+  async function loadModelStatus() {
+    try {
+      const models = await window.LoafAPI.fetch("/api/admin/model-status");
+      renderModelsTable(models);
+    } catch (err) {
+      modelsContainer.innerHTML = `<div style="color:var(--text-alert); font-size:0.9rem;">Could not load models: ${window.LoafAPI.escape(err.message)}</div>`;
+    }
+  }
+
+  function renderModelsTable(models) {
+    if (!models || models.length === 0) {
+      modelsContainer.innerHTML = `<div style="color:var(--text-muted); font-size:0.9rem;">No active models recorded yet. Click "Retrain Now" above to train candidate models.</div>`;
+      return;
+    }
+
+    let trs = "";
+    for (const m of models) {
+      const typeClean = (m.model_type || "moving_average").replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+      const verBadge = `<span class="badge badge-neutral">v${m.version}</span>`;
+      const beatsBadge = m.beats_baseline
+        ? `<span class="badge badge-accent">Beats Baseline</span>`
+        : `<span class="badge badge-neutral">Baseline Fallback</span>`;
+      const trainedStr = m.trained_at ? m.trained_at.replace("T", " ").substring(0, 19) + " UTC" : "—";
+      const maeStr = m.mae !== null && m.mae !== undefined ? `${Number(m.mae).toFixed(2)}` : "—";
+
+      trs += `
+        <tr>
+          <td><strong>${window.LoafAPI.escape(m.item_name || "Item #" + m.item_id)}</strong></td>
+          <td>${window.LoafAPI.escape(typeClean)}</td>
+          <td>${verBadge}</td>
+          <td>${maeStr}</td>
+          <td>${beatsBadge}</td>
+          <td style="font-size:0.82rem; color:var(--text-secondary);">${window.LoafAPI.escape(trainedStr)}</td>
+        </tr>
+      `;
+    }
+
+    modelsContainer.innerHTML = `
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Active Model</th>
+              <th>Version</th>
+              <th>Backtest MAE</th>
+              <th>Promotion Status</th>
+              <th>Last Trained</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${trs}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function handleRetrainNow() {
+    if (!retrainBtn) return;
+    retrainBtn.disabled = true;
+    retrainBtn.innerText = "Training Models...";
+
+    statusBox.style.display = "flex";
+    statusBox.className = "info-banner";
+    statusBox.innerHTML = `
+      <div class="info-banner-icon">⏳</div>
+      <div><strong>Retraining in progress...</strong> Running 4-fold rolling backtest across all bakery items. This may take a few moments.</div>
+    `;
+
+    try {
+      const res = await window.LoafAPI.fetch("/api/admin/retrain", {
+        method: "POST",
+      });
+
+      statusBox.className = "info-banner";
+      statusBox.style.borderColor = "var(--color-primary)";
+      statusBox.innerHTML = `
+        <div class="info-banner-icon">✓</div>
+        <div>
+          <strong>${window.LoafAPI.escape(res.message || "Retraining complete!")}</strong>
+          <div style="font-size:0.85rem; margin-top:0.25rem; color:var(--text-secondary);">
+            New models evaluated and registered. Successfully refreshed at ${new Date().toLocaleTimeString()}.
+          </div>
+        </div>
+      `;
+      window.LoafAPI.showToast("Model retraining completed successfully!", "success");
+
+      await loadModelStatus();
+    } catch (err) {
+      statusBox.className = "warning-box";
+      statusBox.style.display = "block";
+      statusBox.innerHTML = `⚠️ <strong>Retraining Failed:</strong> ${window.LoafAPI.escape(err.message || "An error occurred during training.")}`;
+      window.LoafAPI.showToast(err.message || "Retraining failed.", "error");
+    } finally {
+      retrainBtn.disabled = false;
+      retrainBtn.innerText = "⚡ Retrain Now";
+    }
+  }
+
+  // Initial load
+  loadModelStatus();
+})();
+</script>
+{% endblock %}
+

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}Loaf Ledger — Smart Bakery Forecaster{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='api.js') }}"></script>
+</head>
+<body>
+
+  <!-- Sticky App Header with Tomorrow's Weather & Theme Switcher -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-section">
+        <span class="brand-icon">🥖</span>
+        <div>
+          <a href="{{ url_for('plan_page') if current_user.is_authenticated else url_for('auth.login') }}" style="text-decoration:none; color:inherit;">
+            <h1 class="brand-title">Loaf Ledger</h1>
+          </a>
+          <p class="brand-sub">Artisan Bake Planner & Waste Reducer</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        {% if current_user.is_authenticated %}
+          <!-- Tomorrow's Weather Widget Pill -->
+          <div id="weather-widget" class="weather-widget" title="Tomorrow's Weather">
+            <span class="weather-icon">☀️</span>
+            <span class="weather-temp">Loading weather...</span>
+          </div>
+
+          <!-- User & Shop Pill -->
+          <div class="user-badge" title="{{ current_user.email }}" style="display:flex; align-items:center; gap:0.35rem; font-size:0.82rem; background:var(--bg-surface-alt); padding:0.3rem 0.65rem; border-radius:var(--radius-full); border:1px solid var(--border-color); color:var(--text-secondary); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <span>👤</span>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              {{ current_shop.name if current_shop else current_user.email }}
+            </span>
+          </div>
+
+          <!-- Logout Button -->
+          <form action="{{ url_for('auth.logout') }}" method="POST" style="margin:0; display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm" style="min-height:36px; padding:0.3rem 0.65rem;" title="Log out" aria-label="Log out">
+              Logout
+            </button>
+          </form>
+        {% else %}
+          <a href="{{ url_for('auth.login') }}" class="btn btn-primary btn-sm" style="min-height:36px;">Login</a>
+          <a href="{{ url_for('auth.register') }}" class="btn btn-secondary btn-sm" style="min-height:36px;">Register</a>
+        {% endif %}
+
+        <!-- Light/Dark Mode Switcher -->
+        <button id="theme-toggle-btn" class="theme-toggle-btn" type="button" title="Toggle Light/Dark Theme" aria-label="Toggle Light/Dark Theme">
+          🌙
+        </button>
+      </div>
+    </div>
+
+    {% if current_user.is_authenticated and current_shop %}
+    <!-- Desktop Navigation Tabs -->
+    <nav class="nav-container">
+      <div class="desktop-nav">
+        <a href="{{ url_for('plan_page') }}" class="nav-tab-btn {% if active_tab == 'plan' %}active{% endif %}">
+          <span>📋</span> Plan
+        </a>
+        <a href="{{ url_for('today_page') }}" class="nav-tab-btn {% if active_tab == 'today' %}active{% endif %}">
+          <span>📝</span> Today
+        </a>
+        <a href="{{ url_for('reports_page') }}" class="nav-tab-btn {% if active_tab == 'reports' %}active{% endif %}">
+          <span>📊</span> Reports
+        </a>
+        <a href="{{ url_for('items_page') }}" class="nav-tab-btn {% if active_tab == 'items' %}active{% endif %}">
+          <span>🥐</span> Items
+        </a>
+        <a href="{{ url_for('import_page') }}" class="nav-tab-btn {% if active_tab == 'import' %}active{% endif %}">
+          <span>📥</span> Import
+        </a>
+        <a href="{{ url_for('settings_page') }}" class="nav-tab-btn {% if active_tab == 'settings' %}active{% endif %}">
+          <span>⚙️</span> Settings
+        </a>
+      </div>
+    </nav>
+    {% endif %}
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="app-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% if current_user.is_authenticated and current_shop %}
+  <!-- Mobile Bottom Sticky Navigation with Big Touch Targets -->
+  <nav class="mobile-nav">
+    <a href="{{ url_for('plan_page') }}" class="mobile-nav-btn {% if active_tab == 'plan' %}active{% endif %}">
+      <span class="icon">📋</span>
+      <span>Plan</span>
+    </a>
+    <a href="{{ url_for('today_page') }}" class="mobile-nav-btn {% if active_tab == 'today' %}active{% endif %}">
+      <span class="icon">📝</span>
+      <span>Today</span>
+    </a>
+    <a href="{{ url_for('reports_page') }}" class="mobile-nav-btn {% if active_tab == 'reports' %}active{% endif %}">
+      <span class="icon">📊</span>
+      <span>Reports</span>
+    </a>
+    <a href="{{ url_for('items_page') }}" class="mobile-nav-btn {% if active_tab == 'items' %}active{% endif %}">
+      <span class="icon">🥐</span>
+      <span>Items</span>
+    </a>
+    <a href="{{ url_for('import_page') }}" class="mobile-nav-btn {% if active_tab == 'import' %}active{% endif %}">
+      <span class="icon">📥</span>
+      <span>Import</span>
+    </a>
+    <a href="{{ url_for('settings_page') }}" class="mobile-nav-btn {% if active_tab == 'settings' %}active{% endif %}">
+      <span class="icon">⚙️</span>
+      <span>Settings</span>
+    </a>
+  </nav>
+  {% endif %}
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

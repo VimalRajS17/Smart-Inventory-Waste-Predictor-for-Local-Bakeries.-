@@ -10,6 +10,9 @@
 <header class="topbar">
   <h1>Loaf Ledger</h1>
   <p class="tagline">Tomorrow's bake plan, based on {{ target_date }}</p>
+  {% if weather %}
+  <p class="tagline">Tomorrow's weather: {{ weather.temp_mean_c if weather.temp_mean_c is not none else weather.temperature_c }}°C, {{ 'Rainy' if weather.is_rainy else 'Dry' }}{% if weather.precip_mm is defined and weather.precip_mm is not none %} ({{ weather.precip_mm }} mm rain){% endif %}</p>
+  {% endif %}
 </header>
 
 <main>

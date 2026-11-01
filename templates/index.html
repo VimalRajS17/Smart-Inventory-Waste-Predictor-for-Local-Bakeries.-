@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Loaf Ledger — Smart Bakery Inventory & Demand Forecaster</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <!-- Top Navigation & Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-section">
+        <span class="brand-icon">🥖</span>
+        <div>
+          <h1 class="brand-title">Loaf Ledger</h1>
+          <p class="brand-sub">Artisan Bake Planner & Waste Reducer</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Tomorrow's Weather Widget Pill -->
+        <div id="weather-widget" class="weather-widget" title="Tomorrow's Weather">
+          <span class="weather-icon">☀️</span>
+          <span class="weather-temp">Loading weather...</span>
+        </div>
+
+        <!-- Light/Dark Mode Switcher -->
+        <button id="theme-toggle-btn" class="theme-toggle-btn" title="Toggle Light/Dark Theme">
+          🌙
+        </button>
+      </div>
+    </div>
+
+    <!-- Desktop Navigation Tabs -->
+    <nav class="nav-container">
+      <div class="desktop-nav">
+        <button class="nav-tab-btn active" data-tab="plan">
+          <span>📋</span> Plan
+        </button>
+        <button class="nav-tab-btn" data-tab="today">
+          <span>📝</span> Today
+        </button>
+        <button class="nav-tab-btn" data-tab="reports">
+          <span>📊</span> Reports
+        </button>
+        <button class="nav-tab-btn" data-tab="items">
+          <span>🥐</span> Items
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="app-main">
+
+    <!-- ================================================================= -->
+    <!-- SCREEN 1: PLAN (Bake Plan & Demand Forecast)                      -->
+    <!-- ================================================================= -->
+    <section id="screen-plan" class="tab-screen active">
+      <div class="screen-header">
+        <div>
+          <h2 class="screen-title">Bake Plan & Forecast</h2>
+          <p class="screen-subtitle">Model-driven demand predictions based on history, day of week, and weather.</p>
+        </div>
+        <div class="screen-actions">
+          <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; color:var(--text-secondary); font-weight:500;">
+            Date:
+            <input type="date" id="plan-date-input" class="input-field" style="padding:0.4rem 0.6rem;">
+          </label>
+          <button id="plan-tomorrow-btn" class="btn btn-secondary btn-sm">Tomorrow</button>
+          <button id="plan-refresh-btn" class="btn btn-secondary btn-sm" title="Recalculate predictions">↻ Recalculate</button>
+        </div>
+      </div>
+
+      <!-- Plan Weather Banner -->
+      <div id="plan-weather-banner" class="info-banner" style="display:none;"></div>
+
+      <!-- Items Grid or Loading/Error State -->
+      <div id="plan-container"></div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- SCREEN 2: TODAY (Log Sales, Production & Waste)                   -->
+    <!-- ================================================================= -->
+    <section id="screen-today" class="tab-screen">
+      <div class="screen-header">
+        <div>
+          <h2 class="screen-title">Today's Production & Sales</h2>
+          <p class="screen-subtitle">Record daily quantities sold, baked, and wasted to update the forecast model.</p>
+        </div>
+      </div>
+
+      <!-- Log Entry Form Card -->
+      <div class="card today-form-card">
+        <h3 style="font-family:var(--font-serif); font-size:1.2rem; margin-bottom:1rem; color:var(--text-primary);">
+          Record Daily Production
+        </h3>
+        <form id="today-log-form">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label" for="today-item-select">Bakery Item *</label>
+              <select id="today-item-select" class="select-field" required>
+                <option value="">Loading items...</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="today-date-input">Log Date *</label>
+              <input type="date" id="today-date-input" class="input-field" required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="today-sold-input">Sold Quantity (units)</label>
+              <input type="number" id="today-sold-input" class="input-field" min="0" placeholder="e.g. 25">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="today-baked-input">Baked / Produced (units)</label>
+              <input type="number" id="today-baked-input" class="input-field" min="0" placeholder="e.g. 30">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="today-wasted-input">Wasted / Spoiled (units)</label>
+              <input type="number" id="today-wasted-input" class="input-field" min="0" placeholder="e.g. 2">
+            </div>
+
+            <div class="form-group">
+              <label class="form-checkbox-label">
+                <input type="checkbox" id="today-sold-out-checkbox">
+                <span>Sold out before closing?</span>
+              </label>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end;">
+            <button type="submit" id="today-submit-btn" class="btn btn-primary">
+              Save Daily Log
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Recent Entries Table -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin:1.75rem 0 0.85rem;">
+        <h3 style="font-family:var(--font-serif); font-size:1.2rem; color:var(--text-primary); margin:0;">
+          Recent Production & Sales Logs
+        </h3>
+        <button id="refresh-logs-btn" class="btn btn-secondary btn-sm">↻ Refresh</button>
+      </div>
+
+      <div id="recent-logs-container"></div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- SCREEN 3: REPORTS (Forecast vs Actual & 7-Day Chart)              -->
+    <!-- ================================================================= -->
+    <section id="screen-reports" class="tab-screen">
+      <div class="screen-header">
+        <div>
+          <h2 class="screen-title">Reports & Forecast Accuracy</h2>
+          <p class="screen-subtitle">Compare predicted demand against actual sales over the last 7 days.</p>
+        </div>
+        <div class="screen-actions">
+          <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; color:var(--text-secondary); font-weight:500;">
+            Period:
+            <select id="report-period-select" class="select-field" style="padding:0.4rem 0.6rem;">
+              <option value="7">Last 7 Days</option>
+              <option value="14">Last 14 Days</option>
+              <option value="30">Last 30 Days</option>
+            </select>
+          </label>
+          <button id="reports-refresh-btn" class="btn btn-secondary btn-sm">↻ Refresh</button>
+        </div>
+      </div>
+
+      <!-- Summary KPI Metric Cards -->
+      <div id="reports-kpis-container" class="kpi-grid"></div>
+
+      <!-- Visual Inline SVG Chart Container -->
+      <div class="chart-container">
+        <div class="chart-header">
+          <div class="chart-title">Daily Forecast vs Actual Sold</div>
+          <div class="chart-legend">
+            <div class="legend-item">
+              <span class="legend-swatch" style="background-color:var(--chart-forecast);"></span>
+              <span>Forecast</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch" style="background-color:var(--chart-actual);"></span>
+              <span>Actual Sold</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="reports-chart-wrapper"></div>
+      </div>
+
+      <!-- Detailed Breakdown Table -->
+      <div id="reports-table-container"></div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- SCREEN 4: ITEMS (List, Add, Edit, Delete through /api/items)       -->
+    <!-- ================================================================= -->
+    <section id="screen-items" class="tab-screen">
+      <div class="screen-header">
+        <div>
+          <h2 class="screen-title">Bakery Items & Inventory</h2>
+          <p class="screen-subtitle">Manage products, shelf lives, and on-hand stock for bake planning.</p>
+        </div>
+        <div class="screen-actions">
+          <button id="add-item-btn" class="btn btn-primary">
+            + Add New Item
+          </button>
+        </div>
+      </div>
+
+      <!-- Items Grid Container -->
+      <div id="items-container"></div>
+    </section>
+
+  </main>
+
+  <!-- Mobile Bottom Sticky Navigation -->
+  <nav class="mobile-nav">
+    <button class="mobile-nav-btn active" data-tab="plan">
+      <span class="icon">📋</span>
+      <span>Plan</span>
+    </button>
+    <button class="mobile-nav-btn" data-tab="today">
+      <span class="icon">📝</span>
+      <span>Today</span>
+    </button>
+    <button class="mobile-nav-btn" data-tab="reports">
+      <span class="icon">📊</span>
+      <span>Reports</span>
+    </button>
+    <button class="mobile-nav-btn" data-tab="items">
+      <span class="icon">🥐</span>
+      <span>Items</span>
+    </button>
+  </nav>
+
+  <!-- Add/Edit Item Modal Dialog -->
+  <div id="item-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="item-modal-title" class="modal-title">Add Bakery Item</h3>
+        <button id="item-modal-close-btn" class="modal-close-btn" type="button">&times;</button>
+      </div>
+
+      <form id="item-modal-form">
+        <input type="hidden" id="item-id-input">
+        
+        <div class="form-group" style="margin-bottom:1rem;">
+          <label class="form-label" for="item-name-input">Item Name *</label>
+          <input type="text" id="item-name-input" class="input-field" placeholder="e.g. Cinnamon Roll" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom:1rem;">
+          <label class="form-label" for="item-stock-input">Current Stock On Hand *</label>
+          <input type="number" id="item-stock-input" class="input-field" min="0" value="0" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom:1rem;">
+          <label class="form-label" for="item-shelf-life-input">Shelf Life (Days) *</label>
+          <input type="number" id="item-shelf-life-input" class="input-field" min="1" value="1" required>
+        </div>
+
+        <div class="modal-footer">
+          <button id="item-modal-cancel-btn" type="button" class="btn btn-secondary">Cancel</button>
+          <button id="item-modal-save-btn" type="submit" class="btn btn-primary">Save Item</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Vanilla JavaScript Application -->
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
+

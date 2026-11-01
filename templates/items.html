@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}Bakery Items & Inventory — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="screen-header">
+  <div>
+    <h2 class="screen-title">Bakery Items & Inventory</h2>
+    <p class="screen-subtitle">Manage products, shelf lives, and on-hand stock for bake planning.</p>
+  </div>
+  <div class="screen-actions">
+    <button id="add-item-btn" class="btn btn-primary btn-lg" type="button">
+      + Add New Item
+    </button>
+  </div>
+</div>
+
+<!-- Items Container -->
+<div id="items-container"></div>
+
+<!-- Add/Edit Item Modal Dialog -->
+<div id="item-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="item-modal-title">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 id="item-modal-title" class="modal-title">Add Bakery Item</h3>
+      <button id="item-modal-close-btn" class="modal-close-btn" type="button" aria-label="Close modal">&times;</button>
+    </div>
+
+    <form id="item-modal-form" novalidate>
+      <input type="hidden" id="item-id-input">
+      
+      <div class="form-group" style="margin-bottom:1.15rem;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap;">
+          <label class="form-label" for="item-name-input">Item Name *</label>
+          <span class="field-error-msg" id="item-name-error" aria-live="polite"></span>
+        </div>
+        <input type="text" id="item-name-input" class="input-field input-lg" placeholder="e.g. Cinnamon Roll" autocomplete="off" required>
+      </div>
+
+      <div class="form-group" style="margin-bottom:1.15rem;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap;">
+          <label class="form-label" for="item-stock-input">Current Stock On Hand *</label>
+          <span class="field-error-msg" id="item-stock-error" aria-live="polite"></span>
+        </div>
+        <input type="number" id="item-stock-input" class="input-field input-lg" min="0" value="0" required inputmode="numeric">
+      </div>
+
+      <div class="form-group" style="margin-bottom:1.15rem;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap;">
+          <label class="form-label" for="item-shelf-life-input">Shelf Life (Days) *</label>
+          <span class="field-error-msg" id="item-shelf-life-error" aria-live="polite"></span>
+        </div>
+        <input type="number" id="item-shelf-life-input" class="input-field input-lg" min="1" value="1" required inputmode="numeric">
+      </div>
+
+      <div class="modal-footer">
+        <button id="item-modal-cancel-btn" type="button" class="btn btn-secondary btn-lg">Cancel</button>
+        <button id="item-modal-save-btn" type="submit" class="btn btn-primary btn-lg">Save Item</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const container = document.getElementById("items-container");
+  const addBtn = document.getElementById("add-item-btn");
+  const modal = document.getElementById("item-modal");
+  const modalTitle = document.getElementById("item-modal-title");
+  const form = document.getElementById("item-modal-form");
+  const idInput = document.getElementById("item-id-input");
+  const nameInput = document.getElementById("item-name-input");
+  const stockInput = document.getElementById("item-stock-input");
+  const shelfLifeInput = document.getElementById("item-shelf-life-input");
+  const nameError = document.getElementById("item-name-error");
+  const stockError = document.getElementById("item-stock-error");
+  const shelfLifeError = document.getElementById("item-shelf-life-error");
+  const closeBtn = document.getElementById("item-modal-close-btn");
+  const cancelBtn = document.getElementById("item-modal-cancel-btn");
+  const saveBtn = document.getElementById("item-modal-save-btn");
+
+  let itemsList = [];
+
+  if (addBtn) addBtn.addEventListener("click", openAddModal);
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+  if (form) form.addEventListener("submit", handleSubmit);
+
+  // Clear errors dynamically on input
+  nameInput.addEventListener("input", () => clearFieldError(nameInput, nameError));
+  stockInput.addEventListener("input", () => clearFieldError(stockInput, stockError));
+  shelfLifeInput.addEventListener("input", () => clearFieldError(shelfLifeInput, shelfLifeError));
+
+  function setFieldError(inputEl, errorEl, message) {
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.style.display = "inline";
+    }
+    if (inputEl) {
+      inputEl.classList.add("input-error");
+    }
+  }
+
+  function clearFieldError(inputEl, errorEl) {
+    if (errorEl) {
+      errorEl.textContent = "";
+      errorEl.style.display = "none";
+    }
+    if (inputEl) {
+      inputEl.classList.remove("input-error");
+    }
+  }
+
+  function clearAllErrors() {
+    clearFieldError(nameInput, nameError);
+    clearFieldError(stockInput, stockError);
+    clearFieldError(shelfLifeInput, shelfLifeError);
+  }
+
+  async function loadItems() {
+    window.LoafAPI.showLoading(container, "Loading bakery products...");
+
+    try {
+      itemsList = await window.LoafAPI.fetch("/api/items");
+      renderItems(itemsList);
+    } catch (err) {
+      window.LoafAPI.showError(container, err.message || "Failed to load bakery items.", loadItems);
+    }
+  }
+
+  function renderItems(items) {
+    if (!items || items.length === 0) {
+      window.LoafAPI.showEmpty(
+        container,
+        "No bakery items found",
+        "Add your first product to begin forecasting demand and tracking on-hand inventory.",
+        "+ Add First Item",
+        openAddModal
+      );
+      return;
+    }
+
+    let html = `<div class="grid-2">`;
+    for (const item of items) {
+      html += `
+        <div class="card" style="display:flex; flex-direction:column; justify-content:space-between;">
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.85rem;">
+              <h3 style="font-family:var(--font-serif); font-size:1.3rem; font-weight:600; color:var(--text-primary); margin:0;">
+                ${window.LoafAPI.escape(item.name)}
+              </h3>
+              <span class="stock-tag">ID: #${item.id}</span>
+            </div>
+
+            <div class="plan-metrics-box">
+              <div>
+                <div class="metric-label">Current Stock</div>
+                <div class="metric-val-lg">${item.current_stock ?? 0} <span style="font-size:0.85rem; font-weight:normal;">units</span></div>
+              </div>
+              <div>
+                <div class="metric-label">Shelf Life</div>
+                <div class="metric-val-lg">${item.shelf_life_days ?? 1} <span style="font-size:0.85rem; font-weight:normal;">${item.shelf_life_days === 1 ? "day" : "days"}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.6rem; margin-top:1rem; flex-wrap:wrap;">
+            <button class="btn btn-secondary" style="min-height:44px;" type="button" onclick="window.LoafItems.editItem(${item.id})">
+              ✏️ Edit
+            </button>
+            <button class="btn btn-danger" style="min-height:44px;" type="button" onclick="window.LoafItems.deleteItem(${item.id}, '${window.LoafAPI.escape(item.name)}')">
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+      `;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
+  }
+
+  function openAddModal() {
+    clearAllErrors();
+    modalTitle.innerText = "Add Bakery Item";
+    idInput.value = "";
+    nameInput.value = "";
+    stockInput.value = "0";
+    shelfLifeInput.value = "1";
+    modal.classList.add("active");
+    nameInput.focus();
+  }
+
+  function openEditModal(id) {
+    const it = itemsList.find(x => x.id === id);
+    if (!it) return;
+
+    clearAllErrors();
+    modalTitle.innerText = `Edit ${it.name}`;
+    idInput.value = it.id;
+    nameInput.value = it.name;
+    stockInput.value = it.current_stock ?? 0;
+    shelfLifeInput.value = it.shelf_life_days ?? 1;
+    modal.classList.add("active");
+    nameInput.focus();
+  }
+
+  function closeModal() {
+    clearAllErrors();
+    modal.classList.remove("active");
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    clearAllErrors();
+
+    const id = idInput.value;
+    const name = nameInput.value.trim();
+    const stockRaw = stockInput.value.trim();
+    const shelfLifeRaw = shelfLifeInput.value.trim();
+
+    let hasError = false;
+
+    // Field-level client validation
+    if (!name) {
+      setFieldError(nameInput, nameError, "Item name is required.");
+      if (!hasError) nameInput.focus();
+      hasError = true;
+    }
+
+    const stock = Number(stockRaw);
+    if (stockRaw === "" || isNaN(stock) || stock < 0 || !Number.isInteger(stock)) {
+      setFieldError(stockInput, stockError, "Stock must be 0 or greater.");
+      if (!hasError) stockInput.focus();
+      hasError = true;
+    }
+
+    const shelfLife = Number(shelfLifeRaw);
+    if (shelfLifeRaw === "" || isNaN(shelfLife) || shelfLife < 1 || !Number.isInteger(shelfLife)) {
+      setFieldError(shelfLifeInput, shelfLifeError, "Shelf life must be at least 1 day.");
+      if (!hasError) shelfLifeInput.focus();
+      hasError = true;
+    }
+
+    if (hasError) return;
+
+    const payload = {
+      name,
+      current_stock: stock,
+      shelf_life_days: shelfLife,
+    };
+
+    saveBtn.disabled = true;
+    saveBtn.innerText = "Saving...";
+
+    try {
+      const url = id ? `/api/items/${id}` : "/api/items";
+      const method = id ? "PUT" : "POST";
+
+      await window.LoafAPI.fetch(url, {
+        method,
+        body: JSON.stringify(payload),
+      });
+
+      window.LoafAPI.showToast(`Item '${name}' ${id ? "updated" : "created"} successfully.`, "success");
+      closeModal();
+      await loadItems();
+    } catch (err) {
+      // Map server-side validation error directly next to the matching field
+      const errMsg = err.message || "";
+      const errCode = err.code || "";
+
+      if (errCode === "duplicate_item" || errMsg.toLowerCase().includes("already exists")) {
+        setFieldError(nameInput, nameError, "An item with this name already exists.");
+        nameInput.focus();
+      } else if (errMsg.toLowerCase().includes("current_stock")) {
+        setFieldError(stockInput, stockError, errMsg);
+        stockInput.focus();
+      } else if (errMsg.toLowerCase().includes("shelf_life")) {
+        setFieldError(shelfLifeInput, shelfLifeError, errMsg);
+        shelfLifeInput.focus();
+      } else {
+        window.LoafAPI.showToast(errMsg || "Failed to save item.", "error");
+      }
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.innerText = "Save Item";
+    }
+  }
+
+  async function deleteItem(id, name) {
+    if (!confirm(`Are you sure you want to delete '${name}'?\n\nThis will remove the item and its forecasts.`)) {
+      return;
+    }
+
+    try {
+      await window.LoafAPI.fetch(`/api/items/${id}`, { method: "DELETE" });
+      window.LoafAPI.showToast(`Item '${name}' deleted.`, "success");
+      await loadItems();
+    } catch (err) {
+      window.LoafAPI.showToast(err.message || "Could not delete item.", "error");
+    }
+  }
+
+  window.LoafItems = {
+    editItem: openEditModal,
+    deleteItem,
+  };
+
+  loadItems();
+})();
+</script>
+{% endblock %}

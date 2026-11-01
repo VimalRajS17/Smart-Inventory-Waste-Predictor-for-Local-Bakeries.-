@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}Bake Plan & Forecast — Loaf Ledger{% endblock %}
+
+{% block content %}
+<div class="screen-header">
+  <div>
+    <h2 class="screen-title">Bake Plan & Forecast</h2>
+    <p class="screen-subtitle">Model-driven demand predictions based on history, day of week, and weather.</p>
+  </div>
+  <div class="screen-actions">
+    <div style="display:flex; align-items:center; gap:0.4rem;">
+      <label for="plan-date-input" style="font-size:0.85rem; color:var(--text-secondary); font-weight:600;">
+        Target Date:
+      </label>
+      <input type="date" id="plan-date-input" class="input-field" style="padding:0.4rem 0.6rem; min-height:44px;">
+    </div>
+    <button id="plan-tomorrow-btn" class="btn btn-secondary" style="min-height:44px;" type="button">Tomorrow</button>
+    <button id="plan-refresh-btn" class="btn btn-secondary" style="min-height:44px;" type="button" title="Recalculate predictions" aria-label="Recalculate predictions">↻ Recalculate</button>
+  </div>
+</div>
+
+<!-- Plan Weather Banner -->
+<div id="plan-weather-banner" class="info-banner" style="display:none;"></div>
+
+<!-- Plan Items Container -->
+<div id="plan-container"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+  let currentTargetDate = tomorrowStr;
+  const container = document.getElementById("plan-container");
+  const weatherBanner = document.getElementById("plan-weather-banner");
+  const dateInput = document.getElementById("plan-date-input");
+  const tomorrowBtn = document.getElementById("plan-tomorrow-btn");
+  const refreshBtn = document.getElementById("plan-refresh-btn");
+
+  if (dateInput) {
+    dateInput.value = currentTargetDate;
+    dateInput.addEventListener("change", (e) => {
+      currentTargetDate = e.target.value || tomorrowStr;
+      loadPlan(currentTargetDate);
+    });
+  }
+
+  if (tomorrowBtn) {
+    tomorrowBtn.addEventListener("click", () => {
+      currentTargetDate = tomorrowStr;
+      if (dateInput) dateInput.value = tomorrowStr;
+      loadPlan(currentTargetDate);
+    });
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      loadPlan(currentTargetDate);
+    });
+  }
+
+  window.onWeatherRefreshed = () => {
+    loadPlan(currentTargetDate);
+  };
+
+  async function loadPlan(targetDate) {
+    window.LoafAPI.showLoading(container, "Calculating tomorrow's bake plan...");
+    if (weatherBanner) weatherBanner.style.display = "none";
+
+    try {
+      const data = await window.LoafAPI.fetch(`/api/forecast?date=${encodeURIComponent(targetDate)}`);
+      renderPlan(data, targetDate);
+    } catch (err) {
+      window.LoafAPI.showError(container, err.message || "Could not load the bake forecast.", () => loadPlan(targetDate));
+    }
+  }
+
+  function renderPlan(data, targetDate) {
+    const forecasts = data.forecasts || [];
+
+    if (forecasts.length === 0) {
+      window.LoafAPI.showEmpty(
+        container,
+        "No bakery items found",
+        "Add your bakery products in the Items tab to see daily bake plans and demand forecasts.",
+        "Go to Items",
+        () => { window.location.href = "{{ url_for('items_page') }}"; }
+      );
+      if (weatherBanner) weatherBanner.style.display = "none";
+      return;
+    }
+
+    // Weather Banner
+    const firstW = forecasts[0]?.weather || {};
+    const wSource = forecasts[0]?.weather_source || "forecast";
+    const temp = firstW.temp_mean_c !== null && firstW.temp_mean_c !== undefined ? `${firstW.temp_mean_c}°C` : "—";
+    const condition = firstW.is_rainy ? "🌧️ Rainy" : "☀️ Dry";
+    const rainMm = firstW.precip_mm ? ` (${firstW.precip_mm} mm)` : "";
+    const sourceLabel = wSource === "fallback" ? "Seasonal Fallback Weather" : "Live Weather Forecast";
+    const sourceBadge = wSource === "fallback" ? "badge-alert" : "badge-neutral";
+
+    if (weatherBanner) {
+      weatherBanner.style.display = "flex";
+      weatherBanner.innerHTML = `
+        <div class="info-banner-icon">${firstW.is_rainy ? "🌧️" : "☀️"}</div>
+        <div style="flex:1;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+            <strong>Target Date: ${window.LoafAPI.escape(targetDate)}</strong>
+            <span class="badge ${sourceBadge}">${window.LoafAPI.escape(sourceLabel)}</span>
+          </div>
+          <div style="margin-top:0.25rem;">
+            Expected weather: <strong>${temp}</strong> · ${condition}${rainMm}.
+            ${wSource === "fallback" ? "<em>Live forecast unavailable; using seasonal temperature average.</em>" : ""}
+          </div>
+        </div>
+      `;
+    }
+
+    // Item Cards
+    let html = `<div class="grid-2">`;
+    for (const f of forecasts) {
+      const pred = f.forecast !== undefined ? Math.round(f.forecast * 10) / 10 : Math.round((f.predicted_qty || 0) * 10) / 10;
+      const stock = f.current_stock ?? 0;
+      const buffer = f.buffer !== undefined ? f.buffer : 0;
+      const carryOver = f.carry_over !== undefined ? f.carry_over : 0;
+      const bakeQty = f.bake_qty !== undefined ? f.bake_qty : (f.suggested_bake_qty ?? Math.max(0, Math.ceil(pred + buffer - carryOver)));
+      const lower = f.lower !== undefined ? f.lower : Math.max(0, Math.round((pred - buffer) * 10) / 10);
+      const upper = f.upper !== undefined ? f.upper : Math.round((pred + buffer) * 10) / 10;
+      const rangeStr = `${lower}–${upper}`;
+
+      // Plain wording: 'bake X more' or 'stock is enough'
+      const isBakeNeeded = bakeQty > 0;
+      const bakeClass = isBakeNeeded ? "bake" : "sufficient";
+      const bakeText = isBakeNeeded ? `bake ${bakeQty} more` : "stock is enough";
+      const bakeIcon = isBakeNeeded ? "🥖" : "✓";
+
+      // Overstock alert
+      let overstockHtml = "";
+      if (f.overstock) {
+        overstockHtml = `
+          <div class="warning-box" style="background:#fee2e2; border-color:#ef4444; color:#991b1b; font-weight:600; margin-bottom:0.75rem;">
+            🚨 ${window.LoafAPI.escape(f.overstock_warning || "Overstock warning: available leftovers exceed upper forecast.")}
+          </div>
+        `;
+      }
+
+      // Warnings in plain words
+      let warningsHtml = "";
+      if (f.warnings && f.warnings.length > 0) {
+        for (const w of f.warnings) {
+          if (f.overstock && w.includes("Overstock warning")) continue; // Avoid duplicate overstock warning
+          warningsHtml += `<div class="warning-box">⚠️ ${window.LoafAPI.escape(w)}</div>`;
+        }
+      }
+
+      // 7-Day Outlook rows
+      let outlookTableHtml = "";
+      if (f.seven_day_outlook && f.seven_day_outlook.length > 0) {
+        let trs = "";
+        for (const day of f.seven_day_outlook) {
+          const confBadge = day.confidence === "Normal"
+            ? `<span class="badge badge-neutral" style="font-size:0.75rem;">Normal</span>`
+            : `<span class="badge badge-alert" style="font-size:0.75rem;">Lower confidence</span>`;
+          trs += `
+            <tr>
+              <td><strong>${window.LoafAPI.escape(day.date)}</strong> (${window.LoafAPI.escape(day.day_name)})</td>
+              <td><strong>${day.forecast}</strong></td>
+              <td>${day.lower}–${day.upper}</td>
+              <td>±${day.buffer}</td>
+              <td>${confBadge}</td>
+            </tr>
+          `;
+        }
+
+        outlookTableHtml = `
+          <details style="margin-top:0.85rem; border:1px solid var(--border-color); border-radius:6px; padding:0.5rem 0.75rem; background:var(--bg-main);">
+            <summary style="cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--text-primary); user-select:none;">
+              📅 7-Day Demand Outlook (Recursive Projection)
+            </summary>
+            <div class="table-responsive" style="margin-top:0.5rem;">
+              <table class="data-table" style="font-size:0.82rem; margin-bottom:0;">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Forecast</th>
+                    <th>Range</th>
+                    <th>Buffer</th>
+                    <th>Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${trs}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        `;
+      }
+
+      html += `
+        <div class="card plan-item-card">
+          <div>
+            <div class="plan-card-header">
+              <div>
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                  <div class="plan-item-name">${window.LoafAPI.escape(f.name)}</div>
+                  ${f.rl_active ? `<span class="badge badge-accent" style="font-size:0.75rem;">🤖 RL Bandit ${f.rl_multiplier}x</span>` : ""}
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">
+                  Shelf life: ${f.shelf_life_days ?? 1} ${f.shelf_life_days === 1 ? "day" : "days"} · Carry-over: <strong>${carryOver}</strong>
+                </div>
+              </div>
+              <div class="stock-tag">In Stock: <strong>${stock}</strong></div>
+            </div>
+
+            ${overstockHtml}
+
+            <div class="bake-suggestion-banner ${bakeClass}">
+              <span>${bakeIcon} <strong>${bakeText}</strong></span>
+              <span style="font-size:0.8rem; font-weight:normal; opacity:0.85;">
+                ${f.rl_active ? `RL Multiplier: ${f.rl_multiplier}x · Carry-over: -${carryOver}` : `Buffer: +${buffer} · Carry-over: -${carryOver}`}
+              </span>
+            </div>
+            ${f.rl_active && f.rl_notice ? `<div style="font-size:0.8rem; background:var(--bg-main); padding:0.35rem 0.6rem; border-radius:4px; margin-top:0.35rem; color:var(--text-secondary); border:1px solid var(--border-color);">⚡ ${window.LoafAPI.escape(f.rl_notice)}</div>` : ""}
+
+            <div class="plan-metrics-box">
+              <div>
+                <div class="metric-label">Predicted Demand</div>
+                <div class="metric-val-lg">${pred} <span style="font-size:0.9rem; font-weight:normal;">units</span></div>
+              </div>
+              <div>
+                <div class="metric-label">Expected Range</div>
+                <div class="metric-val-lg">${window.LoafAPI.escape(rangeStr)}</div>
+              </div>
+            </div>
+
+            <div class="plan-reason-text">
+              <strong>Why this quantity?</strong> ${window.LoafAPI.escape(f.reason || "Estimated from day of week, weather, and recent sales trends.")}
+            </div>
+
+            <div>
+              ${warningsHtml}
+            </div>
+
+            ${outlookTableHtml}
+          </div>
+        </div>
+      `;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
+  }
+
+  // Load initial plan
+  loadPlan(currentTargetDate);
+})();
+</script>
+{% endblock %}
+
